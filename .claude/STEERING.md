@@ -24,9 +24,16 @@ Build a custom ML inference accelerator in the PL, driven from Python on the PS 
 ## Toolchain
 
 - **RTL**: Verilog or SystemVerilog
-- **Synthesis/Implementation**: Vivado
+- **Synthesis/Implementation**: Vivado 2025.1, installed at `/tools/Xilinx/Vivado/2025.1/`
+- **Simulation**: Vivado `xsim` (bundled with Vivado)
 - **PS software**: Python on Ubuntu ARM64 via PYNQ
 - **Integration**: PYNQ overlay flow (`.bit` + `.hwh`), Xilinx DMA IP
+
+To activate the toolchain in a shell session:
+```bash
+source /tools/Xilinx/Vivado/2025.1/settings64.sh
+```
+This puts `vivado`, `xvlog`, `xelab`, `xsim`, etc. on PATH. Add to shell config or run before invoking any Vivado/xsim commands.
 
 ## Development Milestones (planned)
 

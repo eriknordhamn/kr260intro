@@ -1,0 +1,48 @@
+# Vivado project and generated files
+vivado/*.xpr
+vivado/*.jou
+vivado/*.log
+vivado/*.str
+vivado/*/
+*.xpr
+*.jou
+
+# Vivado runs and cache
+*.runs/
+*.cache/
+*.hw/
+*.ip_user_files/
+*.sim/
+*.gen/
+*.srcs/
+
+# IP output products (keep sources, ignore generated)
+*.xci
+!**/*.xci.bak
+
+# Bitstreams and hardware handoff (build artifacts, deploy separately)
+*.bit
+*.ltx
+*.hwh
+*.bif
+
+# Vivado backup files
+*.jou
+*.log
+*.str
+*_bak/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
+
+# Editor
+.vscode/
+*.swp
+*.swo

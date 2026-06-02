@@ -31,9 +31,13 @@ Build a custom ML inference accelerator in the PL, driven from Python on the PS 
 
 To activate the toolchain in a shell session:
 ```bash
-source /tools/Xilinx/Vivado/2025.1/settings64.sh
+source /opt/Xilinx/2025.1/Vivado/settings64.sh
 ```
 This puts `vivado`, `xvlog`, `xelab`, `xsim`, etc. on PATH. Add to shell config or run before invoking any Vivado/xsim commands.
+
+Key identifiers for the KR260:
+- Device part: `xck26-sfvc784-2LV-c`
+- Board part: `xilinx.com:kr260_som:part0:1.1`
 
 ## Development Milestones (planned)
 

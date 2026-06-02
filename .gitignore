@@ -1,9 +1,11 @@
+# Build artifacts
+build/
+
 # Vivado project and generated files
 vivado/*.xpr
 vivado/*.jou
 vivado/*.log
 vivado/*.str
-vivado/*/
 *.xpr
 *.jou
 

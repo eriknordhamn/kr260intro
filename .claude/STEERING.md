@@ -71,3 +71,9 @@ The goal is a fully scripted, reproducible build. The GUI is used as a one-time 
 - Do not commit Vivado-generated files: `.xpr`, `project.runs/`, `project.cache/`, IP output products, bitstreams
 - Each milestone gets its own subdirectory under `rtl/`, `sim/`, and `sw/` so previous steps stay runnable
 - Bitstreams and `.hwh` files are build artifacts — generate locally, deploy to board manually or via script
+
+## Git Workflow
+
+- Main branch: `main`
+- Each milestone is developed on a feature branch (e.g. `step/01-environment`, `step/02-axi-lite-echo`)
+- Merge to `main` when the milestone is complete and working

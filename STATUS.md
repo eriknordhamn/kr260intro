@@ -2,25 +2,26 @@
 
 ## Current Step: 01 — Environment / Hello Overlay
 
-Step 01 scaffold is complete and merged to main. The Vivado TCL build script
-and PYNQ load script are in place. The bitstream has not been built yet.
+Bitstream built successfully. One remaining manual step before the step is
+complete: deploy to the KR260 and run the load test.
 
 ### Remaining to complete step 01
 
-1. **Install PYNQ on the KR260** — the board runs stock Kria Ubuntu; PYNQ needs
-   to be installed before `load_overlay.py` can run:
+1. **Copy build outputs** (bitstream already built, just needs copying):
+   ```bash
+   mkdir -p build/step01_hello
+   cp build/step01_hello/_vivado_project/hello_overlay.runs/impl_1/hello_overlay_wrapper.bit \
+      build/step01_hello/hello_overlay.bit
+   cp build/step01_hello/_vivado_project/hello_overlay.gen/sources_1/bd/hello_overlay/hw_handoff/hello_overlay.hwh \
+      build/step01_hello/hello_overlay.hwh
+   ```
+
+2. **Install PYNQ on the KR260** (if not already done):
    ```bash
    pip install pynq   # on the KR260
    ```
 
-2. **Build the bitstream** — on the dev machine (no GUI needed):
-   ```bash
-   source /opt/Xilinx/2025.1/Vivado/settings64.sh
-   make step01
-   ```
-   Outputs: `build/step01_hello/hello_overlay.bit` and `.hwh`
-
-3. **Deploy and test** — copy outputs to the KR260 and run:
+3. **Deploy and test** — see `docs/board-setup.md` for full instructions:
    ```bash
    scp build/step01_hello/hello_overlay.{bit,hwh} user@kr260:~/step01/
    scp sw/step01_hello/load_overlay.py user@kr260:~/step01/
@@ -28,11 +29,18 @@ and PYNQ load script are in place. The bitstream has not been built yet.
    ```
    Expected: `Step 01 PASS`
 
+### Notes
+
+- `build.tcl` had a bug where the `.hwh` glob path used `.srcs/` instead of
+  `.gen/` — fixed. Future `make step01` runs will complete without the manual
+  copy above.
+- The full build takes ~20 min on an i5-8500 (synthesis dominates).
+
 ---
 
 ## Completed Steps
 
-_None yet._
+_None yet (step 01 pending board test)._
 
 ---
 

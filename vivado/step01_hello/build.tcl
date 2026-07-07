@@ -66,7 +66,7 @@ if {[get_property PROGRESS [get_runs impl_1]] != "100%"} {
 
 # Copy deliverables to build/
 set bit [glob ${proj_dir}/${proj_name}.runs/impl_1/*.bit]
-set hwh [glob ${proj_dir}/${proj_name}.srcs/sources_1/bd/${design_name}/hw_handoff/${design_name}.hwh]
+set hwh [glob ${proj_dir}/${proj_name}.gen/sources_1/bd/${design_name}/hw_handoff/${design_name}.hwh]
 
 file copy -force $bit [file join $build_dir ${design_name}.bit]
 file copy -force $hwh [file join $build_dir ${design_name}.hwh]

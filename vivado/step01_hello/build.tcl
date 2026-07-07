@@ -32,6 +32,13 @@ apply_bd_automation \
     -config {apply_board_preset "1"} \
     [get_bd_cells zynq_ultra_ps_e_0]
 
+# Disable the AXI master ports — no PL logic in this step, so they must
+# be off or their clock pins will fail validation.
+set_property -dict [list \
+    CONFIG.PSU__USE__M_AXI_GP0 {0} \
+    CONFIG.PSU__USE__M_AXI_GP1 {0} \
+] [get_bd_cells zynq_ultra_ps_e_0]
+
 validate_bd_design
 save_bd_design
 

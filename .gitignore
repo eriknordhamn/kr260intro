@@ -34,6 +34,11 @@ vivado/*.str
 *.str
 *_bak/
 
+# Vivado GUI drops these in the working directory
+.Xil/
+NA/
+xsim.dir/
+
 # Python
 __pycache__/
 *.py[cod]

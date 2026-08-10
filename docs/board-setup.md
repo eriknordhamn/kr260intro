@@ -10,13 +10,33 @@ How to prepare the Kria KR260 for use with this project. Do this once before run
 
 ## 1. Install PYNQ
 
+PYNQ builds several native C extensions from source during install (I2C,
+video, DisplayPort, etc.), so install the required headers first — otherwise
+the build fails partway through with errors like:
+
+```
+fatal error: xf86drm.h: No such file or directory
+```
+
 On the board:
 
 ```bash
+sudo apt update
+sudo apt install build-essential python3-dev libffi-dev libdrm-dev pkg-config
 pip install pynq
 ```
 
-PYNQ pulls in its own dependencies (numpy, cffi, etc.). This takes a few minutes.
+Note: the KR260 Robotics Starter Kit has no DisplayPort output, but PYNQ's
+setup builds the DisplayPort extension unconditionally — `libdrm-dev` is
+still required even though the feature is unused on this board.
+
+PYNQ pulls in its own Python dependencies (numpy, cffi, etc.) and downloads a
+~60MB source package, which can be slow on a flaky connection. If the install
+times out mid-download, retry with a longer timeout:
+
+```bash
+pip install --user --default-timeout=180 --retries 10 pynq
+```
 
 Verify:
 

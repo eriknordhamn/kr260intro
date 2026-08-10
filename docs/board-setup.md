@@ -10,38 +10,45 @@ How to prepare the Kria KR260 for use with this project. Do this once before run
 
 ## 1. Install PYNQ
 
-PYNQ builds several native C extensions from source during install (I2C,
-video, DisplayPort, etc.), so install the required headers first — otherwise
-the build fails partway through with errors like:
+Do **not** `pip install pynq` directly — on stock Ubuntu (not Xilinx's
+all-in-one PYNQ board image) this fails building native extensions PYNQ
+needs (DisplayPort, HDMI, CMA allocator), because headers and libraries that
+Xilinx normally bundles into their custom image aren't present. See
+`STATUS.md` for the full story of what we hit trying the raw pip route.
 
-```
-fatal error: xf86drm.h: No such file or directory
-```
-
-On the board:
-
-```bash
-sudo apt update
-sudo apt install build-essential python3-dev libffi-dev libdrm-dev pkg-config
-pip install pynq
-```
-
-Note: the KR260's DisplayPort output does need `libdrm-dev` to build this
-PYNQ extension, so this isn't wasted — it's a real prerequisite either way.
-
-PYNQ pulls in its own Python dependencies (numpy, cffi, etc.) and downloads a
-~60MB source package, which can be slow on a flaky connection. If the install
-times out mid-download, retry with a longer timeout:
+Use AMD's dedicated installer for PYNQ on Kria SOM Ubuntu instead. It
+installs system dependencies, builds the native pieces PYNQ needs, and sets
+up a Python virtual environment for PYNQ + JupyterLab:
 
 ```bash
-pip install --user --default-timeout=180 --retries 10 pynq
+git clone https://github.com/Xilinx/Kria-PYNQ.git
+cd Kria-PYNQ
+sudo bash install.sh -b KR260
+```
+
+This takes a while (native builds + a large download) — expect 15–30+
+minutes depending on the board's network and CPU.
+
+**PYNQ is installed into a dedicated virtual environment**, not system or
+user Python:
+
+```
+/usr/local/share/pynq-venv
 ```
 
 Verify:
 
 ```bash
-python3 -c "import pynq; print(pynq.__version__)"
+/usr/local/share/pynq-venv/bin/python3 -c "import pynq; print(pynq.__version__)"
 ```
+
+Plain `python3 -c "import pynq"` (outside the venv) will **not** find it —
+don't use it to sanity-check the install.
+
+The installer also stands up JupyterLab as a systemd service:
+`http://<board-hostname-or-ip>:9090/lab`, password `xilinx`. This project
+uses plain scripts (see below) rather than notebooks, but JupyterLab is
+there if you want to explore interactively.
 
 ## 2. Step 01 — Load the Hello Overlay
 
@@ -63,7 +70,7 @@ scp sw/step01_hello/load_overlay.py      user@kr260:~/step01/
 
 ```bash
 cd ~/step01
-python3 load_overlay.py
+sudo /usr/local/share/pynq-venv/bin/python3 load_overlay.py
 ```
 
 Expected output:
@@ -80,4 +87,5 @@ If you see `Step 01 PASS`, the toolchain is validated end to end.
 
 - Replace `user@kr260` with your board's actual username and hostname/IP.
 - The `.bit` and `.hwh` files must have the same base name and be in the same directory for PYNQ to load the overlay correctly.
-- PYNQ requires root or the user to be in the `sudo` group on some Ubuntu configurations. If the overlay load fails with a permissions error, try `sudo python3 load_overlay.py`.
+- Overlay loading needs root (writes to `/sys/class/fpga_manager/.../firmware`), so always run scripts with `sudo`, using the venv's interpreter path directly — plain `sudo python3` uses system Python and won't find PYNQ.
+- If the board isn't on your LAN's DNS, check whether `avahi-daemon` is running (`systemctl status avahi-daemon`) — if so, `<hostname>.local` (e.g. `kria.local`) works in place of an IP.

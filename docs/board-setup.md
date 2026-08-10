@@ -26,9 +26,8 @@ sudo apt install build-essential python3-dev libffi-dev libdrm-dev pkg-config
 pip install pynq
 ```
 
-Note: the KR260 Robotics Starter Kit has no DisplayPort output, but PYNQ's
-setup builds the DisplayPort extension unconditionally — `libdrm-dev` is
-still required even though the feature is unused on this board.
+Note: the KR260's DisplayPort output does need `libdrm-dev` to build this
+PYNQ extension, so this isn't wasted — it's a real prerequisite either way.
 
 PYNQ pulls in its own Python dependencies (numpy, cffi, etc.) and downloads a
 ~60MB source package, which can be slow on a flaky connection. If the install

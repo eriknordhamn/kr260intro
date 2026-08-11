@@ -1,36 +1,19 @@
 # Project Status
 
-## Current Step: 01 — Environment / Hello Overlay
+## Current Step: 01 — Environment / Hello Overlay — COMPLETE
 
-Bitstream built successfully. PYNQ is now installed and working on the
-board via the Kria-PYNQ installer (see below). Remaining: deploy the
-bitstream and run the load test using the venv interpreter.
-
-### Remaining to complete step 01
-
-1. **Copy build outputs** (bitstream already built, just needs copying):
-   ```bash
-   mkdir -p build/step01_hello
-   cp build/step01_hello/_vivado_project/hello_overlay.runs/impl_1/hello_overlay_wrapper.bit \
-      build/step01_hello/hello_overlay.bit
-   cp build/step01_hello/_vivado_project/hello_overlay.gen/sources_1/bd/hello_overlay/hw_handoff/hello_overlay.hwh \
-      build/step01_hello/hello_overlay.hwh
-   ```
-
-2. **Deploy and test** — see `docs/board-setup.md` for full instructions:
-   ```bash
-   scp build/step01_hello/hello_overlay.{bit,hwh} user@kr260:~/step01/
-   scp sw/step01_hello/load_overlay.py user@kr260:~/step01/
-   ssh user@kr260 "cd ~/step01 && sudo /usr/local/share/pynq-venv/bin/python3 load_overlay.py"
-   ```
-   Expected: `Step 01 PASS`
+Bitstream built, PYNQ installed via the Kria-PYNQ installer, overlay
+deployed and loaded on the board. `load_overlay.py` printed `Step 01 PASS`.
 
 ### Notes
 
 - `build.tcl` had a bug where the `.hwh` glob path used `.srcs/` instead of
-  `.gen/` — fixed. Future `make step01` runs will complete without the manual
-  copy above.
+  `.gen/` — fixed. Future `make step01` runs will complete without a manual
+  copy step.
 - The full build takes ~20 min on an i5-8500 (synthesis dominates).
+- Deploy/load required two `sudo` env fixes not obvious from the plain
+  instructions — see the "Issue Log: overlay load on the board" section
+  below and `docs/board-setup.md` for the working command.
 
 ---
 
@@ -94,9 +77,60 @@ run through the venv interpreter.
 
 ---
 
+## Issue Log: overlay load on the board
+
+Even with PYNQ installed and the bitstream copied over, `load_overlay.py`
+failed twice more under plain `sudo /usr/local/share/pynq-venv/bin/python3`,
+both times because `sudo` doesn't inherit the calling shell's environment
+the way the plain instructions assumed.
+
+1. **`Device.devices` was empty** — `pynq.Device` warned
+   `No devices found, is the XRT environment sourced?`, even though
+   `sudo xbutil examine` (outside Python) showed the device as ready.
+
+2. **`FileNotFoundError: .../t.xclbin`** — once the device was found,
+   `Overlay()` failed building the temporary xclbin. PYNQ shells out to
+   `xclbinutil`, and there are two copies on this board: the Ubuntu `xrt`
+   apt package's (`/usr/bin/xclbinutil`), which **segfaults** on this
+   board, and a working one bundled in the pynq-venv.
+
+Chasing each with a hand-plumbed `sudo VAR=... PATH=...` line worked but
+felt like guesswork, so before settling for it we looked for where the
+board's own tooling solves the same problem — `jupyter.service` also runs
+as root via systemd and also needs PYNQ working, so however it gets a
+correct environment must be the vendor-intended mechanism, not something
+to reverse-engineer ourselves.
+
+Found it: `/usr/local/bin/start_jupyter.sh` (systemd's `ExecStart`) begins
+with a comment — *"Source the environment as the init system won't"* — and
+explicitly re-sources `/etc/environment` and every `/etc/profile.d/*.sh`.
+`/etc/profile.d/pynq_venv.sh` is where `XILINX_XRT=/usr` actually comes
+from, plus it activates the PYNQ venv (which is what puts the working
+`xclbinutil` first on `PATH` in a normal login shell) and runs a
+device-tree-overlay insert step. None of that runs under a plain `sudo`
+because `sudo`, like systemd, doesn't inherit login-shell environment.
+
+**Resolution:** rather than pass `XILINX_XRT`/`PATH` by hand, mirror what
+`start_jupyter.sh` does — re-source `/etc/environment` +
+`/etc/profile.d/*.sh` as root, then launch the venv's Python. Wrapped as
+`sw/run_pynq.sh`; any script that touches PYNQ on the board should run
+through it:
+
+```bash
+./run_pynq.sh load_overlay.py
+```
+
+Output: `Overlay loaded successfully.` / `IP cores in overlay:
+['zynq_ultra_ps_e_0']` / `Step 01 PASS`.
+
+---
+
 ## Completed Steps
 
-_None yet (step 01 pending board test — PYNQ install is now done, bitstream deploy/load test still to run)._
+- **Step 01 — Environment / Hello Overlay.** Vivado build → PYNQ install via
+  Kria-PYNQ installer → bitstream deployed and loaded on the board,
+  `Step 01 PASS`. See issue logs above for the PYNQ-install and
+  overlay-load gotchas hit along the way.
 
 ---
 

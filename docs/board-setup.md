@@ -60,24 +60,25 @@ After building the bitstream on the dev machine (`make step01`), copy the output
 # Create a directory on the board
 ssh user@kr260 "mkdir -p ~/step01"
 
-# Copy bitstream, hardware handoff, and test script
+# Copy bitstream, hardware handoff, test script, and the PYNQ run wrapper
 scp build/step01_hello/hello_overlay.bit user@kr260:~/step01/
 scp build/step01_hello/hello_overlay.hwh user@kr260:~/step01/
 scp sw/step01_hello/load_overlay.py      user@kr260:~/step01/
+scp sw/run_pynq.sh                       user@kr260:~/step01/
 ```
 
 **On the board:**
 
 ```bash
 cd ~/step01
-sudo /usr/local/share/pynq-venv/bin/python3 load_overlay.py
+./run_pynq.sh load_overlay.py
 ```
 
 Expected output:
 
 ```
 Overlay loaded successfully.
-IP cores in overlay: ['(none — PS only, as expected)']
+IP cores in overlay: ['zynq_ultra_ps_e_0']
 Step 01 PASS
 ```
 
@@ -87,5 +88,5 @@ If you see `Step 01 PASS`, the toolchain is validated end to end.
 
 - Replace `user@kr260` with your board's actual username and hostname/IP.
 - The `.bit` and `.hwh` files must have the same base name and be in the same directory for PYNQ to load the overlay correctly.
-- Overlay loading needs root (writes to `/sys/class/fpga_manager/.../firmware`), so always run scripts with `sudo`, using the venv's interpreter path directly — plain `sudo python3` uses system Python and won't find PYNQ.
+- Overlay loading needs root (writes to `/sys/class/fpga_manager/.../firmware`), and it needs the PYNQ venv's own environment (`XILINX_XRT`, the venv's `PATH`) which normally comes from `/etc/profile.d/pynq_venv.sh` in a login shell — but `sudo` doesn't inherit login-shell environment, so a plain `sudo .../python3 script.py` fails in two different ways (see `STATUS.md`'s issue log for the full story). Always run PYNQ scripts on the board through **`sw/run_pynq.sh`**, which re-sources the board's environment as root before launching the venv's Python — the same pattern the board's own `jupyter.service` uses internally (`/usr/local/bin/start_jupyter.sh`), so it's the vendor-sanctioned way to do this, not a workaround we invented.
 - If the board isn't on your LAN's DNS, check whether `avahi-daemon` is running (`systemctl status avahi-daemon`) — if so, `<hostname>.local` (e.g. `kria.local`) works in place of an IP.

@@ -62,7 +62,7 @@ The goal is a fully scripted, reproducible build. The GUI is used as a one-time 
 
 **GUI needed once per milestone that introduces new IP:**
 - **Block Design (IP Integrator)** — wire up Zynq PS, AXI Interconnect, AXI DMA, custom IP. The Zynq PS block has hundreds of settings; configure in GUI, then `File → Export Block Design as TCL`. That script recreates the design headlessly and generates the `.hwh` PYNQ needs.
-- **IP Packager** — package custom RTL as a Vivado IP core for the block design; export to TCL after first use.
+- **IP Packager** — package custom RTL as a Vivado IP core for the block design; export to TCL after first use. The packager should **reference** RTL files from `rtl/`, not copy them, so `rtl/` stays the single source of truth. Export the packaging steps as `package_ip.tcl` (next to `build.tcl` under `vivado/<step>/`) — the packaged IP output itself (`component.xml`, `xgui/`, etc.) is generated, not committed; see Directory Layout.
 
 **Workflow per milestone:**
 1. Configure new IP blocks in the Vivado GUI (one-off)
@@ -76,6 +76,12 @@ The goal is a fully scripted, reproducible build. The GUI is used as a one-time 
 - `sw/` — Python host code and PYNQ notebooks/drivers
 - `vivado/` — TCL scripts to recreate the Vivado project; no generated files committed
 - `constraints/` — XDC constraint files
+- `build/` — everything Vivado generates, gitignored entirely. Per step:
+  `build/<step>/_vivado_project/` (scratch project state — runs, cache, IP
+  output products), `build/<step>/ip_repo/` (packaged custom IP, output of
+  `package_ip.tcl` — same tier as `_vivado_project/`, never a top-level
+  source dir), and the final deliverables `build/<step>/*.bit` + `*.hwh`
+  copied out for board deploy.
 
 ## Conventions
 

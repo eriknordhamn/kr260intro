@@ -76,6 +76,7 @@ The goal is a fully scripted, reproducible build. The GUI is used as a one-time 
 - `sw/` — Python host code and PYNQ notebooks/drivers
 - `vivado/` — TCL scripts to recreate the Vivado project; no generated files committed
 - `constraints/` — XDC constraint files
+- `docs/` — reference docs (board setup, Xilinx tooling, PYNQ internals) — not step-specific, read once and reused across milestones
 - `build/` — everything Vivado generates, gitignored entirely. Per step:
   `build/<step>/_vivado_project/` (scratch project state — runs, cache, IP
   output products), `build/<step>/ip_repo/` (packaged custom IP, output of
@@ -88,6 +89,7 @@ The goal is a fully scripted, reproducible build. The GUI is used as a one-time 
 - Do not commit Vivado-generated files: `.xpr`, `project.runs/`, `project.cache/`, IP output products, bitstreams
 - Each milestone gets its own subdirectory under `rtl/`, `sim/`, and `sw/` so previous steps stay runnable
 - Bitstreams and `.hwh` files are build artifacts — generate locally, deploy to board manually or via script
+- Every board-side PYNQ script must run through `sw/run_pynq.sh`, not a bare `sudo .../python3`. `sudo` and systemd both skip the login-shell environment PYNQ depends on (`XILINX_XRT`, venv-first `PATH`) — see `docs/pynq-venv.md`. Deploy `run_pynq.sh` alongside each step's driver script and invoke it as `./run_pynq.sh <script.py>`.
 
 ## Git Workflow
 

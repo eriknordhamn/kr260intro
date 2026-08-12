@@ -1,6 +1,15 @@
 # Project Status
 
-## Current Step: 01 — Environment / Hello Overlay — COMPLETE
+## Current Step: 02 — AXI-Lite Echo Register — COMPLETE
+
+RTL simulated, packaged as a Vivado IP core, wired to the Zynq PS in a
+block design, built to a bitstream, deployed, and verified on the KR260.
+`echo_test.py` wrote and read back five test values (including
+`0x00000000` and `0xFFFFFFFF`) through the AXI-Lite register and printed
+`Step 02 PASS`. See the walkthrough below for how the pipeline fits
+together, or `docs/vivado-flow.html` for the diagrammed version.
+
+## Step 01 — Environment / Hello Overlay — COMPLETE
 
 Bitstream built, PYNQ installed via the Kria-PYNQ installer, overlay
 deployed and loaded on the board. `load_overlay.py` printed `Step 01 PASS`.
@@ -132,13 +141,137 @@ Output: `Overlay loaded successfully.` / `IP cores in overlay:
   `Step 01 PASS`. See issue logs above for the PYNQ-install and
   overlay-load gotchas hit along the way.
 
+- **Step 02 — AXI-Lite Echo Register.** First custom RTL, packaged as a
+  Vivado IP core and wired to the Zynq PS. Verified on hardware —
+  `echo_test.py` printed `Step 02 PASS` after five write/read-back checks.
+  See the walkthrough below.
+
+---
+
+## Step 02 walkthrough: AXI-Lite Echo Register
+
+Goal: prove the PS↔PL *control* path (register read/write over
+AXI4-Lite) before attempting bulk data movement (step 03, DMA). The
+whole pipeline, file by file:
+
+```
+rtl/step02_axi_lite_echo/axi_lite_echo.sv     hand-written RTL
+sim/step02_axi_lite_echo/                     xsim testbench, no Vivado project needed
+vivado/step02_axi_lite_echo/package_ip.tcl    RTL -> Vivado IP core (headless)
+vivado/step02_axi_lite_echo/axi_lite_echo_overlay_bd.tcl   PS + IP block design (from GUI export)
+vivado/step02_axi_lite_echo/build.tcl         ties it together -> .bit + .hwh
+sw/step02_axi_lite_echo/                      PYNQ driver (board-side)
+```
+
+### RTL — `rtl/step02_axi_lite_echo/axi_lite_echo.sv`
+
+A minimal AXI4-Lite slave: one 32-bit register at address 0x0, write
+then read back. Deliberately the simplest legal AXI4-Lite slave —
+unpipelined (one write or read in flight at a time), single register so
+address bits aren't decoded. Port names follow Xilinx's standard
+`S_AXI_*` naming convention on purpose: Vivado's IP packager and block
+design tooling auto-infer the AXI4-Lite interface, clock, and reset
+purely from those names, which is what makes `package_ip.tcl` below
+fully scriptable instead of requiring manual interface wiring in the
+GUI.
+
+### Simulation — `sim/step02_axi_lite_echo/`
+
+`tb_axi_lite_echo.sv` drives the DUT directly (no Vivado project, no
+board) with self-checking write/read-back transactions — reset value,
+two distinct values, and a back-to-back write/read to catch handshake
+bugs. `run_sim.sh` (→ `make sim_step02`) compiles and runs it under
+`xsim` in batch mode. This is the fast inner loop for RTL changes —
+seconds, not the ~20 minutes a full bitstream rebuild takes.
+
+### `vivado/step02_axi_lite_echo/package_ip.tcl`
+
+Turns the RTL into a Vivado IP core Vivado's block-design canvas can
+place. Fully headless — no GUI needed to *run* it (a one-off GUI
+session was used earlier only to confirm Vivado's interface
+auto-detection worked as expected; those exact commands, journaled by
+Vivado, were cleaned up into this script). Steps:
+
+1. Creates a throwaway project (`build/step02_axi_lite_echo/_vivado_project`)
+   containing only `axi_lite_echo.sv`, added by reference (not copied).
+2. `ipx::package_project` — packages it as IP, auto-inferring the
+   `S_AXI` AXI4-Lite (`aximm`), clock, and reset bus interfaces from the
+   signal names.
+3. Re-opens the packaged core (`ipx::edit_ip_in_project`) to set
+   vendor/description/revision metadata.
+4. Regenerates GUI/checksum files and saves (`ipx::create_xgui_files`,
+   `ipx::update_checksums`, `ipx::save_core`).
+5. Closes both scratch projects it opened.
+
+Output: `build/step02_axi_lite_echo/ip_repo/component.xml` (gitignored,
+regenerated on demand — `make package_step02`).
+
+### `vivado/step02_axi_lite_echo/axi_lite_echo_overlay_bd.tcl`
+
+Not hand-written — this is Vivado's own **File → Export Block Design as
+TCL** output, committed close to verbatim, per CLAUDE.md's
+GUI-once-then-export convention. Recreates the block design:
+
+- Zynq UltraScale+ PS, board preset applied, with `M_AXI_HPM0_FPD`
+  (labelled `M_AXI_GP0` in the underlying Tcl properties — Xilinx's GUI
+  and property-name conventions disagree here) enabled and GP1/GP2
+  disabled — the one AXI-Lite master port we need, nothing else.
+- An instance of the packaged `axi_lite_echo` IP.
+- An AXI SmartConnect between them (auto-inserted by Connection
+  Automation during the interactive session), plus a
+  `proc_sys_reset` block generating the synchronized reset the
+  SmartConnect and echo IP need.
+- Address map: `axi_lite_echo`'s register is mapped at `0xA0000000`
+  (4 KB address window — AXI's minimum decode granularity, even though
+  the register itself is 4 bytes).
+
+The GUI session that produced this only happens again if the block
+design itself changes (new IP, new connections) — routine RTL edits
+inside `axi_lite_echo.sv` don't touch this file at all.
+
+### `vivado/step02_axi_lite_echo/build.tcl`
+
+The end-to-end headless build, structured like step01's but sourcing
+the exported block-design script instead of inlining `create_bd_cell`
+calls directly:
+
+1. Creates the project, registers `ip_repo/` as an IP repository
+   (`set_property ip_repo_paths`) so `axi_lite_echo` resolves in the
+   catalog.
+2. Sources `axi_lite_echo_overlay_bd.tcl` — builds, validates, and
+   saves the block design.
+3. `make_wrapper` generates the HDL top-level wrapping the block
+   design, added to the project as the synthesis top.
+4. Runs synthesis, then implementation through bitstream generation,
+   checking `PROGRESS` after each and erroring out on failure rather
+   than silently continuing.
+5. Copies the `.bit` and `.hwh` deliverables out to
+   `build/step02_axi_lite_echo/`.
+
+Requires `package_ip.tcl` to have already run (`make step02` chains
+`package_step02` before `build.tcl` automatically).
+
+### Makefile targets
+
+| Target | Does |
+|---|------|
+| `make sim_step02` | RTL testbench under `xsim` — seconds |
+| `make package_step02` | RTL → Vivado IP core (headless) |
+| `make step02` | Full bitstream build (packages IP first, then `build.tcl`) — ~20 min |
+
+### Software (planned)
+
+`sw/step02_axi_lite_echo/` — a PYNQ driver script (run via
+`./run_pynq.sh`, per the established board-side convention) that loads
+the overlay, writes a value to the echo register through PYNQ's
+register/MMIO access, reads it back, and asserts it matches.
+
 ---
 
 ## Upcoming Steps
 
 | # | Goal |
 |---|------|
-| 2 | AXI-Lite echo register — first RTL, read/write from Python |
 | 3 | DMA data path — bulk buffer transfer PS↔PL |
 | 4 | Dot product kernel — first real compute in RTL |
 | 5 | Linear layer — matrix-vector multiply |

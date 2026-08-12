@@ -94,6 +94,36 @@ then exposes the peripherals it found as Python attributes/objects
 (`ol.ip_dict`, register read/write, DMA channels, etc.) so the rest of
 your code never has to think about bitstreams or XRT calls directly.
 
+## Block design gotchas (Zynq UltraScale+)
+
+Notes from building step 02's block design — things that cost time
+because the GUI, the underlying Tcl properties, and Xilinx's own docs
+don't always agree on names.
+
+- **`M_AXI_GP0` is not what the GUI calls it.** On Zynq-7000, the PS's
+  general-purpose AXI master port really is labelled `M_AXI_GP0` in the
+  GUI. On Zynq UltraScale+ (this board), the underlying Tcl property is
+  still `CONFIG.PSU__USE__M_AXI_GP0`, but the GUI checkbox and the port
+  that appears on the PS block are both labelled **`AXI HPM0 FPD`**
+  ("High Performance Master 0, Full Power Domain") — same signal,
+  different name depending on which layer you're looking at. `M_AXI_GP1`
+  ↔ `AXI HPM1 FPD` the same way.
+- **Leave unused master ports disabled.** An enabled-but-unwired AXI
+  master interface on the PS fails `validate_bd_design` with an
+  unconnected-pin error — it won't silently sit there the way an unused
+  physical FPGA pin could. If a design only needs one AXI-Lite master,
+  disable the others rather than leaving them on.
+- **Connection Automation inserts a SmartConnect, not an Interconnect.**
+  Zynq-7000 designs typically get an `axi_interconnect`; on UltraScale+
+  designs Vivado 2025.1 reaches for `xilinx.com:ip:smartconnect`
+  instead, plus a `proc_sys_reset` block for the synchronized reset it
+  needs. Both just route AXI transactions between masters/slaves — the
+  substitution is a UltraScale+ default, not a decision to second-guess.
+- **Address windows round up to 4 KB minimum**, even for a single
+  32-bit register — that's AXI's minimum decode granularity, not
+  something the IP declares. Don't expect `assign_bd_address` to hand
+  back a window sized to what the peripheral actually uses.
+
 ## Cheat sheet: which tool do I reach for?
 
 | I want to... | Tool |

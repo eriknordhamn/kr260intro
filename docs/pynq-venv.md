@@ -120,3 +120,47 @@ Any future board-side script in this project (step 02's AXI-Lite driver,
 step 03's DMA driver, etc.) should be run the same way — deploy the
 script to the board alongside `run_pynq.sh` and invoke it through the
 wrapper, rather than calling `sudo python3` directly.
+
+## Alternative: source as yourself, `sudo -E` for the script
+
+`run_pynq.sh` elevates once and does the sourcing *inside* that root
+process. The environment only needs to exist in whichever process finally
+`exec`s Python — it doesn't have to be root that does the sourcing. A
+two-step version, splitting the unprivileged and privileged parts instead
+of bundling them:
+
+```bash
+source /etc/profile.d/pynq_venv.sh                          # unprivileged, fine — no sudo needed
+sudo -E /usr/local/share/pynq-venv/bin/python3 load_overlay.py   # one sudo, -E carries the env over
+```
+
+`-E` preserves your already-sourced environment variables (`XILINX_XRT`,
+etc.) into the `sudo`'d process, and the explicit full interpreter path
+means `sudo` doesn't need to consult `PATH` to find `python3` in the first
+place.
+
+**Caveat, not just a style preference:** Ubuntu's default `sudoers` sets
+`secure_path`, which overrides `PATH` specifically — even under `-E` — for
+whatever `sudo` invokes. So while `XILINX_XRT` survives via `-E`, the
+venv-first `PATH` ordering that makes the *working* `xclbinutil` get found
+(see above) does **not** survive, even though `python3` itself is given by
+full path. Python still shells out to `xclbinutil` *by name*, so it would
+resolve via `sudo`'s `secure_path`-restored `PATH` — landing back on the
+broken system copy at `/usr/bin/xclbinutil`, reproducing the second step
+01 failure. Fixing that would need explicitly re-injecting `PATH` past
+`secure_path`, e.g.:
+
+```bash
+sudo -E env "PATH=$PATH" /usr/local/share/pynq-venv/bin/python3 load_overlay.py
+```
+
+(`env` here is the thing `sudo` actually execs — once running, it's free to
+set `PATH` for its own child (`python3`) regardless of `secure_path`, which
+only constrains the lookup for the command `sudo` itself launches.)
+
+This hasn't been tried on the board — reasoned through, not confirmed. It's
+noted here as the two-step alternative to `run_pynq.sh`'s single-`sudo`
+approach, not a replacement recommendation: it requires remembering to
+source *and* get the `PATH` re-injection right in every new shell, whereas
+`run_pynq.sh` is a single self-contained command that works regardless of
+what the calling shell has or hasn't sourced.

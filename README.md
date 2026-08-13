@@ -11,15 +11,17 @@ Custom ML inference accelerator for the Xilinx Kria KR260, driven from Python on
 
 ## Milestones
 
-| # | Branch | Goal |
-|---|--------|------|
-| 1 | `step/01-environment` | Hello overlay — PS-only bitstream loads via PYNQ, validates toolchain |
-| 2 | `step/02-axi-lite-echo` | Echo register in PL, read/write from Python |
-| 3 | `step/03-dma-data-path` | Move buffers PS→PL→PS via AXI DMA |
-| 4 | `step/04-dot-product` | Vector dot product kernel in RTL, verified from Python |
-| 5 | `step/05-linear-layer` | Matrix-vector multiply (dense layer) |
-| 6 | `step/06-activation` | ReLU in PL, layer-to-layer chaining |
-| 7 | `step/07-ml-inference` | Full MLP inference end-to-end |
+| # | Status | Branch | Goal |
+|---|--------|--------|------|
+| 1 | ✅ Done | `step/01-environment` | Hello overlay — PS-only bitstream loads via PYNQ, validates toolchain |
+| 2 | ✅ Done | `step/02-axi-lite-echo` | Echo register in PL, read/write from Python |
+| 3 | ✅ Done | `step/03-dma-loopback` | Move buffers PS→PL→PS via AXI DMA |
+| 4 | | `step/04-dot-product` | Vector dot product kernel in RTL, verified from Python |
+| 5 | | `step/05-linear-layer` | Matrix-vector multiply (dense layer) |
+| 6 | | `step/06-activation` | ReLU in PL, layer-to-layer chaining |
+| 7 | | `step/07-ml-inference` | Full MLP inference end-to-end |
+
+See `STATUS.md` for detailed build/deploy walkthroughs and issue logs for each completed step.
 
 ## Repository Layout
 

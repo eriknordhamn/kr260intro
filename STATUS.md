@@ -1,6 +1,14 @@
 # Project Status
 
-## Current Step: 02 — AXI-Lite Echo Register — COMPLETE
+## Current Step: 03 — DMA Loopback — COMPLETE
+
+AXI DMA wired in a block design with its MM2S (read) stream looped
+directly back into its S2MM (write) stream — no PL logic in between.
+Built to a bitstream, deployed, and verified on the KR260.
+`dma_loopback_test.py` DMA'd a 1024-word buffer PS→PL→PS and confirmed
+every word matched, printing `Step 03 PASS`. See the walkthrough below.
+
+## Step 02 — AXI-Lite Echo Register — COMPLETE
 
 RTL simulated, packaged as a Vivado IP core, wired to the Zynq PS in a
 block design, built to a bitstream, deployed, and verified on the KR260.
@@ -146,6 +154,12 @@ Output: `Overlay loaded successfully.` / `IP cores in overlay:
   `echo_test.py` printed `Step 02 PASS` after five write/read-back checks.
   See the walkthrough below.
 
+- **Step 03 — DMA Loopback.** Stock Xilinx AXI DMA IP only, no custom
+  RTL — validates the bulk-transfer path ahead of step 04's compute
+  kernel. Verified on hardware — `dma_loopback_test.py` DMA'd a
+  1024-word buffer PS→PL→PS and printed `Step 03 PASS`. See the
+  walkthrough below.
+
 ---
 
 ## Step 02 walkthrough: AXI-Lite Echo Register
@@ -268,11 +282,89 @@ register/MMIO access, reads it back, and asserts it matches.
 
 ---
 
+## Step 03 walkthrough: DMA Loopback
+
+Goal: prove the PS↔PL *bulk-transfer* path (AXI DMA moving a buffer
+PS→PL→PS) before attempting a compute kernel that actually processes
+the stream (step 04). No custom RTL — the DMA's `M_AXIS_MM2S` output is
+wired straight into its own `S_AXIS_S2MM` input, so a buffer read out
+of DDR streams directly back into a second DDR buffer with no PL logic
+between them. File by file:
+
+```
+vivado/step03_dma_loopback/create_bd_scratch_project.tcl   scratch project for GUI block-design work
+vivado/step03_dma_loopback/dma_loopback_bd.tcl              PS + AXI DMA block design (from GUI export)
+vivado/step03_dma_loopback/build.tcl                        ties it together -> .bit + .hwh
+sw/step03_dma_loopback/                                     PYNQ driver (board-side)
+```
+
+Unlike step 02, there's no `package_ip.tcl` — both IP blocks (Zynq PS,
+AXI DMA) are stock Xilinx IP, nothing to package.
+
+### Block design
+
+Built interactively in the GUI (Direct Register mode — Scatter Gather
+disabled, both MM2S and S2MM channels enabled), then exported via
+**File → Export Block Design as TCL**. Two gotchas hit along the way,
+now recorded in `docs/xilinx-tools.md`'s block-design gotchas section
+so they don't cost time again:
+
+1. **Validation failed with unconnected clocks** the first pass — some
+   of the DMA's clock inputs weren't picked up because Connection
+   Automation was run in separate passes for `S_AXI_LITE` and `M_AXI`
+   rather than all at once. Fixed by re-running Connection Automation
+   until it stopped offering anything new.
+2. **`M_AXI_MM2S`/`M_AXI_S2MM` were never offered for auto-wiring at
+   all**, and validation didn't flag it as an error. Root cause: the
+   PS's `S_AXI_HP0_FPD` slave port — needed for any PL master to reach
+   DDR at DMA-relevant bandwidth — is **off by default**, unlike
+   `M_AXI_HPM0_FPD` which the board preset enables automatically.
+   Connection Automation has no compatible slave to route to when it's
+   disabled, so it silently offers nothing instead of erroring. Fixed
+   by re-customizing the Zynq PS block (PS-PL Configuration → PS-PL
+   Interfaces → Slave Interface → AXI HP → enable HP0), then re-running
+   Connection Automation, which then wired both ports through.
+
+### `vivado/step03_dma_loopback/build.tcl`
+
+Same shape as step 02's `build.tcl` minus the IP-packaging
+prerequisite: create project → source the exported block-design script
+→ `make_wrapper` → synthesis → implementation/bitstream → copy `.bit`/
+`.hwh` out to `build/step03_dma_loopback/`. Clean build: 0 errors, 0
+critical warnings, synthesis ~46s / implementation ~4 min on this
+design.
+
+### `sw/step03_dma_loopback/dma_loopback_test.py`
+
+Allocates two `pynq.allocate()` buffers (physically-contiguous,
+cache-coherent — a regular numpy array isn't safe to hand to a DMA
+engine), fills the send buffer with a 1024-word test pattern, arms
+`dma.recvchannel.transfer()` before `dma.sendchannel.transfer()` (so
+`S_AXIS_S2MM`'s `tready` is already asserted when MM2S starts pushing
+data into the loopback wire), waits on both channels, then compares
+buffers word-for-word.
+
+**Verified on hardware:**
+```
+$ ./run_pynq.sh dma_loopback_test.py
+Overlay loaded successfully.
+IP cores in overlay: ['axi_dma_0', 'zynq_ultra_ps_e_0']
+All 1024 words matched.
+Step 03 PASS
+```
+
+### Makefile targets
+
+| Target | Does |
+|---|------|
+| `make step03` | Full bitstream build (no IP packaging step needed) |
+
+---
+
 ## Upcoming Steps
 
 | # | Goal |
 |---|------|
-| 3 | DMA data path — bulk buffer transfer PS↔PL |
 | 4 | Dot product kernel — first real compute in RTL |
 | 5 | Linear layer — matrix-vector multiply |
 | 6 | Activation + chaining — ReLU, layer fusion |

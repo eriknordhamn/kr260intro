@@ -123,6 +123,15 @@ don't always agree on names.
   32-bit register — that's AXI's minimum decode granularity, not
   something the IP declares. Don't expect `assign_bd_address` to hand
   back a window sized to what the peripheral actually uses.
+- **HP slave ports are disabled by default — GP master ports aren't.**
+  `M_AXI_HPM0_FPD` ("AXI HPM0 FPD") comes enabled from the board preset
+  since basic PS-PL control needs it, but the high-bandwidth `S_AXI_HP0_FPD`
+  ("AXI HP0 FPD") slave port used for bulk DDR access from PL masters
+  (e.g. an AXI DMA's `M_AXI_MM2S`/`M_AXI_S2MM`) is off until you enable it
+  yourself: re-customize the Zynq PS block, PS-PL Configuration → PS-PL
+  Interfaces → Slave Interface → AXI HP. With it disabled, Connection
+  Automation doesn't error — it just silently offers nothing for those
+  master pins, which looks identical to a missed wiring step.
 
 ## Cheat sheet: which tool do I reach for?
 

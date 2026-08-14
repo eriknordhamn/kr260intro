@@ -1,6 +1,39 @@
 # Project Status
 
-## Current Step: 03 — DMA Loopback — COMPLETE
+## Current Step: 04 — Dot Product Kernel — IN PROGRESS
+
+First real compute in the PL. A streaming dot-product kernel sits where step
+03 looped the DMA's `M_AXIS_MM2S` straight back into its `S_AXIS_S2MM`. Both
+operand vectors arrive interleaved on the single stream (`a0 b0 a1 b1 …`,
+`TLAST` on the final beat), so the vector length is implicit in the packet
+and the IP needs no control interface at all — no AXI4-Lite, no registers.
+
+Chosen over a second DMA channel or AXI-Lite-loaded weights because it reuses
+step 03's block design almost verbatim; the pairing convention is the only
+artificial part, and step 05 will revisit it when a matrix needs real operand
+bandwidth.
+
+**Done and verified:**
+- `rtl/step04_dot_product/dot_product.sv` — AXI4-Stream in/out, signed
+  multiply into a 64-bit accumulator, one result beat per packet
+- `sim/step04_dot_product/` — self-checking testbench, all 10 checks pass
+  under xsim: signed operands, `TVALID` gaps, randomized backpressure,
+  back-to-back packets, 1024 pairs, and a malformed odd-beat packet
+- `vivado/step04_dot_product/package_ip.tcl` — packages clean as
+  `kr260intro.local:user:dot_product:1.0`
+
+**Outstanding:**
+- Block design — to be built in the GUI and exported;
+  `dot_product_accel_bd.tcl` currently holds an unvalidated hand-edited copy
+  of step 03's export, to be overwritten by the export
+- `build.tcl` / `create_bd_scratch_project.tcl` — written, never run
+- `sw/step04_dot_product/` — not started
+- Hardware verification on the board
+
+`TODO_NEXT.md` carries the full handoff state, the step-04 GUI click-path,
+and the design decisions worth reviewing.
+
+## Step 03 — DMA Loopback — COMPLETE
 
 AXI DMA wired in a block design with its MM2S (read) stream looped
 directly back into its S2MM (write) stream — no PL logic in between.
@@ -322,8 +355,14 @@ so they don't cost time again:
    Connection Automation has no compatible slave to route to when it's
    disabled, so it silently offers nothing instead of erroring. Fixed
    by re-customizing the Zynq PS block (PS-PL Configuration → PS-PL
-   Interfaces → Slave Interface → AXI HP → enable HP0), then re-running
-   Connection Automation, which then wired both ports through.
+   Interfaces → Slave Interface → AXI HP), then re-running Connection
+   Automation, which then wired both ports through.
+
+   Note the port that actually ended up enabled was **`S_AXI_HPC0_FPD`**,
+   the cache-coherent one — the exported TCL sets `PSU__USE__S_AXI_GP0` and
+   its address segments read `SAXIGP0/HPC0_DDR_LOW`, not HP0. Both live on
+   the same "AXI HP" page of the dialog, which is why the distinction is
+   easy to lose; see `docs/xilinx-tools.md`.
 
 ### `vivado/step03_dma_loopback/build.tcl`
 
@@ -365,7 +404,6 @@ Step 03 PASS
 
 | # | Goal |
 |---|------|
-| 4 | Dot product kernel — first real compute in RTL |
 | 5 | Linear layer — matrix-vector multiply |
 | 6 | Activation + chaining — ReLU, layer fusion |
 | 7 | ML inference — full MLP end-to-end |

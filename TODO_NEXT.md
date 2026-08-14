@@ -108,6 +108,10 @@ parsed it. It's there as a reference for what the finished design should
 contain; the GUI export should **overwrite it wholesale**, not be merged into
 it.
 
+The general procedure — plus the simulation loop, waveform debugging, and a
+checklist — is in `docs/vivado-gui-session.md`. What follows is the
+step-04-specific version of it.
+
 Create the scratch project (registers the packaged IP in the catalog):
 
 ```bash

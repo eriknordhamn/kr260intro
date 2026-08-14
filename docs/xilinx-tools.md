@@ -96,9 +96,10 @@ your code never has to think about bitstreams or XRT calls directly.
 
 ## Block design gotchas (Zynq UltraScale+)
 
-Notes from building step 02's block design — things that cost time
-because the GUI, the underlying Tcl properties, and Xilinx's own docs
-don't always agree on names.
+Notes from building the block designs for steps 02–04 — things that cost
+time because the GUI, the underlying Tcl properties, and Xilinx's own docs
+don't always agree on names. The procedure these apply to is in
+`docs/vivado-gui-session.md`.
 
 - **`M_AXI_GP0` is not what the GUI calls it.** On Zynq-7000, the PS's
   general-purpose AXI master port really is labelled `M_AXI_GP0` in the
@@ -132,6 +133,53 @@ don't always agree on names.
   Interfaces → Slave Interface → AXI HP. With it disabled, Connection
   Automation doesn't error — it just silently offers nothing for those
   master pins, which looks identical to a missed wiring step.
+- **"HP" in the dialog covers HP and HPC, and they're different ports.**
+  The same Slave Interface → AXI HP page offers both the plain
+  high-performance ports (`S_AXI_HP0..3_FPD`) and the cache-coherent ones
+  (`S_AXI_HPC0/1_FPD`, which route through the CCI and can snoop the APU
+  caches). Step 03 enabled **HPC0**, so its address segments read
+  `SAXIGP0/HPC0_DDR_LOW`. Either works for DMA to DDR; just be aware the
+  exported TCL names whichever you picked, and that a design written against
+  one won't validate if the other is the one enabled.
+- **Connection Automation does not wire AXI4-Stream.** It reasons about
+  memory-mapped AXI, where there's an address map to work from. Which stream
+  master feeds which stream slave is a design decision it won't guess, so
+  point-to-point AXIS links (e.g. an AXI DMA's `M_AXIS_MM2S` into a custom
+  kernel) must be dragged by hand. It won't complain about the missing link
+  either — `validate_bd_design` catches genuinely unconnected pins, but a
+  design where you forgot the kernel entirely and looped the DMA back on
+  itself is perfectly valid.
+
+## IP packaging gotchas
+
+From packaging step 04's streaming kernel — the AXI4-Stream equivalents of
+what step 02 hit with AXI4-Lite.
+
+- **Interface inference is reliable; clock *association* isn't.** Naming
+  ports `s_axis_tdata`/`m_axis_tvalid`/… gets both streams inferred as
+  `xilinx.com:interface:axis:1.0` with no manual work, same as `S_AXI_*`
+  did for AXI4-Lite. But `ASSOCIATED_BUSIF` on the clock came out naming
+  only the **master** stream (watch the `IP_Flow 19-4728` message during
+  packaging). Without the slave stream listed, IP Integrator doesn't know
+  `aclk` clocks it. Fix explicitly in `package_ip.tcl`:
+  ```tcl
+  foreach busif {s_axis m_axis} {
+      ipx::associate_bus_interfaces -busif $busif -clock aclk [ipx::current_core]
+  }
+  ```
+- **`associate_bus_interfaces` doesn't validate the interface name.** It
+  appends whatever string it's handed, so passing `S_AXIS` when the inferred
+  interface is `s_axis` produces the junk list
+  `m_axis:s_axis:S_AXIS:M_AXIS` rather than an error. Match the case in
+  `component.xml` exactly.
+- **Localparams referenced by internal wires trigger parser warnings.**
+  `[IP_Flow 19-587] HDL port or parameter '<wire>' has a dependency on the
+  module local parameter ... '<NAME>'` — harmless, but it's noise on every
+  packaging run, and it goes away if the localparam is replaced by a plain
+  signal. Worth avoiding in code that gets packaged.
+- **`ipx::check_integrity` passing is not the same as the IP being usable.**
+  It checks the component is well-formed, not that the interfaces are
+  associated the way IP Integrator needs. Read the inference messages.
 
 ## Cheat sheet: which tool do I reach for?
 

@@ -69,6 +69,15 @@ The goal is a fully scripted, reproducible build. The GUI is used as a one-time 
 2. Export block design as TCL → commit the script, not the project dir
 3. All iteration (RTL edits, re-synthesis, re-sim) runs from CLI
 
+The step-by-step procedure for both the GUI session and the simulation loop
+is in `docs/vivado-gui-session.md` — follow it rather than reconstructing it
+from a previous step's TCL. Zynq UltraScale+ traps that cost time before are
+in `docs/xilinx-tools.md` → Block design gotchas.
+
+An exported block-design TCL may be hand-edited to prototype a small change,
+but it must validate headlessly before being believed, and a later GUI export
+**overwrites the file wholesale** — never merge an export into hand edits.
+
 ## Directory Layout
 
 - `rtl/` — RTL source (Verilog/SystemVerilog), organized by module
@@ -88,6 +97,11 @@ The goal is a fully scripted, reproducible build. The GUI is used as a one-time 
 
 - Do not commit Vivado-generated files: `.xpr`, `project.runs/`, `project.cache/`, IP output products, bitstreams
 - Each milestone gets its own subdirectory under `rtl/`, `sim/`, and `sw/` so previous steps stay runnable
+- Every milestone with custom RTL gets a self-checking testbench under `sim/<step>/`, runnable standalone through `xvlog`/`xelab`/`xsim` with no Vivado project — it prints a single `=== TB PASS ===` / `=== TB FAIL ===` line, so passing never depends on reading a waveform
+- Keep module ports and parameters plain Verilog-compatible (no packed structs, interfaces, or enums on the boundary) even when the internals use SystemVerilog — the IP packager only partially supports SystemVerilog top files
+- Each step's Makefile targets follow the same names: `sim_step<NN>`, `package_step<NN>`, `bd_step<NN>` (scratch project for GUI work), `validate_step<NN>` (block design only, no synthesis), `step<NN>` (full bitstream)
+- `build.tcl` takes `-tclargs validate` to source the block design, validate, and stop — a ~1 minute check on a block-design change instead of a ~20 minute build. Run it on any exported or edited BD script before a full build
+- The block design's name must match `design_name` in that step's `build.tcl`; the build globs for `<design_name>.bd` and its `.hwh`
 - Bitstreams and `.hwh` files are build artifacts — generate locally, deploy to board manually or via script
 - Every board-side PYNQ script must run through `sw/run_pynq.sh`, not a bare `sudo .../python3`. `sudo` and systemd both skip the login-shell environment PYNQ depends on (`XILINX_XRT`, venv-first `PATH`) — see `docs/pynq-venv.md`. Deploy `run_pynq.sh` alongside each step's driver script and invoke it as `./run_pynq.sh <script.py>`.
 

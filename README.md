@@ -16,12 +16,25 @@ Custom ML inference accelerator for the Xilinx Kria KR260, driven from Python on
 | 1 | ✅ Done | `step/01-environment` | Hello overlay — PS-only bitstream loads via PYNQ, validates toolchain |
 | 2 | ✅ Done | `step/02-axi-lite-echo` | Echo register in PL, read/write from Python |
 | 3 | ✅ Done | `step/03-dma-loopback` | Move buffers PS→PL→PS via AXI DMA |
-| 4 | | `step/04-dot-product` | Vector dot product kernel in RTL, verified from Python |
+| 4 | 🔨 In progress | `step/04-dot-product` | Vector dot product kernel in RTL, verified from Python |
 | 5 | | `step/05-linear-layer` | Matrix-vector multiply (dense layer) |
 | 6 | | `step/06-activation` | ReLU in PL, layer-to-layer chaining |
 | 7 | | `step/07-ml-inference` | Full MLP inference end-to-end |
 
 See `STATUS.md` for detailed build/deploy walkthroughs and issue logs for each completed step.
+
+## Reference docs
+
+Not step-specific — written once, reused across milestones.
+
+| Doc | Covers |
+|---|---|
+| `docs/vivado-gui-session.md` | Running simulations; the once-per-milestone block-design GUI session and export |
+| `docs/xilinx-tools.md` | What each Xilinx tool does, and Zynq UltraScale+ block-design gotchas |
+| `docs/board-setup.md` | Getting the KR260 to a working PYNQ install |
+| `docs/pynq-venv.md` | Why board-side scripts must run through `sw/run_pynq.sh` |
+| `docs/jupyter-and-pynq-background.md` | Background on Jupyter/PYNQ and PYNQ's design intent |
+| `docs/vivado-flow.html` | The RTL → bitstream → overlay pipeline, diagrammed |
 
 ## Repository Layout
 

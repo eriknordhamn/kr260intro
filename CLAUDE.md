@@ -105,6 +105,25 @@ but it must validate headlessly before being believed, and a later GUI export
 - Bitstreams and `.hwh` files are build artifacts — generate locally, deploy to board manually or via script
 - Every board-side PYNQ script must run through `sw/run_pynq.sh`, not a bare `sudo .../python3`. `sudo` and systemd both skip the login-shell environment PYNQ depends on (`XILINX_XRT`, venv-first `PATH`) — see `docs/pynq-venv.md`. Deploy `run_pynq.sh` alongside each step's driver script and invoke it as `./run_pynq.sh <script.py>`.
 
+## Session Handoff: `TODO_NEXT.md`
+
+A scratch handoff file for pausing mid-milestone — ending a session, or going
+off to run something manually (a GUI session, a board test). It covers the
+**current step only** and carries no history of previous ones.
+
+- Written when work stops mid-step: what's done and verified, what's written
+  but never run, what's not started, and the exact next commands
+- Rewritten wholesale each time, not appended to
+- **Deleted when the milestone closes.** Anything durable in it — how the
+  pipeline fits together, decisions and their rationale, issues hit and how
+  they were resolved — moves into that step's `STATUS.md` walkthrough
+- Not a task list that accumulates. If it describes a step that's already
+  merged, it's stale and should have been deleted
+
+`STATUS.md` is the permanent record; `TODO_NEXT.md` is the sticky note on top
+of it. They will briefly overlap while a step is in flight — that's expected,
+and resolved by deleting the sticky note, never by trimming `STATUS.md`.
+
 ## Git Workflow
 
 - Main branch: `main`

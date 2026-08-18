@@ -152,7 +152,40 @@ artifact, not the `.xpr`.
 
 ### After the GUI
 
-Confirm the export replays headlessly before spending a full build on it. A
+**First confirm the export actually landed.** The export dialog can write
+somewhere other than where you meant, or not happen at all if the session
+ran long and the last step got skipped:
+
+```bash
+git status --short vivado/<step>/
+```
+
+The BD script should show as modified. This check matters more than it
+looks: `build.tcl` sources the *committed* Tcl, never your GUI project. If
+the export silently didn't land, the next `make step<NN>` builds the old
+script and **succeeds**, handing you a bitstream that has nothing to do with
+the session you just spent an hour on — with no error anywhere to suggest it.
+
+Step 04 hit exactly this. It was caught afterwards by comparing the scratch
+project's live design against the committed script:
+
+```bash
+python3 -c "
+import json
+bd=json.load(open('build/<step>/_vivado_project/<proj>.srcs/sources_1/bd/<name>/<name>.bd'))['design']
+print(sorted(bd['components']))
+for k,v in sorted(bd.get('interface_nets',{}).items()):
+    print(k, '->', v['interface_ports'])
+"
+grep -oE "connect_bd_intf_net -intf_net [A-Za-z0-9_]+ .*" vivado/<step>/<name>_bd.tcl
+```
+
+Matching cell lists and matching interface nets mean the two designs agree
+and the committed script is trustworthy regardless of its provenance. That's
+worth knowing either way — it's the same comparison that tells you whether a
+hand-edit still reflects reality.
+
+Then confirm the export replays headlessly before spending a full build on it. A
 `validate`-only mode in `build.tcl` (see step 04's) sources the exported BD,
 validates, and stops — about a minute instead of twenty:
 
@@ -191,4 +224,5 @@ merging by hand.
 - [ ] Clocks and resets present on every cell
 - [ ] Validate Design clean
 - [ ] Exported over `vivado/<step>/<design_name>_bd.tcl`
+- [ ] `git status` confirms that file actually changed
 - [ ] `make validate_step<NN>` passes from a clean project

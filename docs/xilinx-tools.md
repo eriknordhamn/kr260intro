@@ -150,6 +150,27 @@ don't always agree on names. The procedure these apply to is in
   design where you forgot the kernel entirely and looped the DMA back on
   itself is perfectly valid.
 
+- **A stream master without TKEEP connects anyway, and warns at synthesis.**
+  Step 04's kernel carries only TDATA/TVALID/TREADY/TLAST — no TKEEP, no
+  TSTRB. IP Integrator wires it to the AXI DMA without complaint, handling
+  the two directions differently: on the S2MM side the DMA's TKEEP *input*
+  is tied high automatically, which is the correct value for a 32-bit
+  stream where all four bytes are always valid; on the MM2S side the DMA's
+  TKEEP *output* has no destination and is left dangling, surfacing at
+  synthesis as
+
+  ```
+  WARNING: [Synth 8-7071] port 'm_axis_mm2s_tkeep' of module
+  'dot_product_accel_axi_dma_0_0' is unconnected for instance 'axi_dma_0'
+  ```
+
+  Both are benign as long as every beat carries all bytes, which is true
+  for any stream of whole 32-bit words. TKEEP only starts to matter for
+  streams with partial final beats, where it's what tells the receiver how
+  many bytes of the last beat count — a byte-oriented stream whose length
+  isn't a multiple of the bus width. Don't chase the warning; do add TKEEP
+  to a kernel that will ever see a partial beat.
+
 ## IP packaging gotchas
 
 From packaging step 04's streaming kernel — the AXI4-Stream equivalents of

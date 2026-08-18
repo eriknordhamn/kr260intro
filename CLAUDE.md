@@ -78,6 +78,11 @@ An exported block-design TCL may be hand-edited to prototype a small change,
 but it must validate headlessly before being believed, and a later GUI export
 **overwrites the file wholesale** — never merge an export into hand edits.
 
+`build.tcl` sources the **committed** block-design TCL, never the GUI's
+project. After any GUI session, confirm with `git status` that the export
+actually changed that file — if it didn't, the next build silently succeeds
+from the old script and the bitstream won't reflect the session at all.
+
 ## Directory Layout
 
 - `rtl/` — RTL source (Verilog/SystemVerilog), organized by module
@@ -99,6 +104,7 @@ but it must validate headlessly before being believed, and a later GUI export
 - Each milestone gets its own subdirectory under `rtl/`, `sim/`, and `sw/` so previous steps stay runnable
 - Every milestone with custom RTL gets a self-checking testbench under `sim/<step>/`, runnable standalone through `xvlog`/`xelab`/`xsim` with no Vivado project — it prints a single `=== TB PASS ===` / `=== TB FAIL ===` line, so passing never depends on reading a waveform
 - Keep module ports and parameters plain Verilog-compatible (no packed structs, interfaces, or enums on the boundary) even when the internals use SystemVerilog — the IP packager only partially supports SystemVerilog top files
+- Module internals use SystemVerilog: declare signals `logic` rather than `reg`/`wire`, and write `always_ff` / `always_comb` rather than bare `always @(posedge ...)` / `always @(*)`. The point is the tools then error on an accidental latch or an incomplete sensitivity list instead of silently inferring one; `logic` vs `reg` is no difference in synthesized hardware. Ports stay `wire`/`reg` per the rule above. Steps 02 and 04 predate this convention and are Verilog-2001 throughout — leave them alone unless they're being edited for another reason.
 - Each step's Makefile targets follow the same names: `sim_step<NN>`, `package_step<NN>`, `bd_step<NN>` (scratch project for GUI work), `validate_step<NN>` (block design only, no synthesis), `step<NN>` (full bitstream)
 - `build.tcl` takes `-tclargs validate` to source the block design, validate, and stop — a ~1 minute check on a block-design change instead of a ~20 minute build. Run it on any exported or edited BD script before a full build
 - The block design's name must match `design_name` in that step's `build.tcl`; the build globs for `<design_name>.bd` and its `.hwh`

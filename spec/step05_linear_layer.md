@@ -142,6 +142,12 @@ The driver **must**:
    `S2MM` is already accepting when the first result beat appears.
 5. **Allocate `pynq.allocate()` buffers**, not plain numpy arrays: int16 for
    the two input buffers, uint32 (M entries) for the result buffer.
+6. **Keep each packet inside one DMA transfer.** The weight packet is
+   `2·M·N` bytes and must go in a single `transfer()` call, because each
+   call emits its own `TLAST` and `TLAST` is what delimits the packet —
+   splitting a layer across two transfers would end a row early and
+   desynchronise every row after it. The AXI DMA's buffer-length register
+   therefore caps M·N directly; see §9.
 
 Malformed input is handled rather than rejected: if packet 2 ends mid-row,
 the partial accumulator is flushed as a final result with `TLAST`. The
@@ -255,11 +261,22 @@ Step 04's design with two changes: the kernel swapped, and the DMA widened.
 | AXI DMA — MM2S stream width | **128** |
 | AXI DMA — S2MM memory-map width | 32 |
 | AXI DMA — S2MM stream width | 32 |
+| AXI DMA — Width of Buffer Length Register (`c_sg_length_width`) | **26** |
 | PS slave port | `S_AXI_HPC0_FPD` (enabled; off by default — see `docs/xilinx-tools.md`) |
 
 Connections: `M_AXIS_MM2S → linear_layer_0/s_axis`,
 `linear_layer_0/m_axis → S_AXIS_S2MM`, everything else by Connection
 Automation, re-run until it offers nothing further.
+
+The length-register width is **not** a detail. It defaults to 14 bits, i.e.
+a 16383-byte ceiling on any single transfer, and the hardware run found it
+immediately: a 4096×2 layer is exactly 16384 bytes of weights and failed with
+`ValueError: Transfer size is 16384 bytes, which exceeds the maximum DMA
+buffer size 16383`. Since the packet cannot be split (§5, contract 6), that
+default caps the whole design at M·N ≤ 8191 int16 — a 256×32 layer. At 26
+bits the ceiling is 64 MB, i.e. ~33.5M weights, which is no practical limit.
+PYNQ reads this width from the `.hwh`, so the error surfaces cleanly in
+Python rather than as a silent truncation.
 
 128 bits is `S_AXI_HPC0_FPD`'s native width, so the memory-map side needs no
 width conversion. The asymmetry (128 in, 32 out) is deliberate: results are

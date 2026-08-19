@@ -2,7 +2,8 @@ VIVADO_SETTINGS := /opt/Xilinx/2025.1/Vivado/settings64.sh
 VIVADO := vivado -mode batch -notrace
 
 .PHONY: step01 sim_step02 package_step02 step02 step03 \
-        sim_step04 package_step04 bd_step04 validate_step04 step04 clean help
+        sim_step04 package_step04 bd_step04 validate_step04 step04 \
+        sim_step05 clean help
 
 help:
 	@echo "Targets:"
@@ -16,6 +17,7 @@ help:
 	@echo "  bd_step04      Create the scratch project for GUI block-design work (step 04)"
 	@echo "  validate_step04 Build the block design and validate only, no synthesis (step 04)"
 	@echo "  step04         Build the dot-product overlay bitstream (step 04)"
+	@echo "  sim_step05     Simulate the matrix-vector linear layer (step 05)"
 	@echo "  clean          Remove build artifacts"
 
 step01:
@@ -47,6 +49,9 @@ validate_step04:
 
 step04: package_step04
 	bash -c "source $(VIVADO_SETTINGS) && $(VIVADO) -source vivado/step04_dot_product/build.tcl"
+
+sim_step05:
+	bash sim/step05_linear_layer/run_sim.sh
 
 clean:
 	rm -rf build/

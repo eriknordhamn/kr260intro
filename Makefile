@@ -3,7 +3,7 @@ VIVADO := vivado -mode batch -notrace
 
 .PHONY: step01 sim_step02 package_step02 step02 step03 \
         sim_step04 package_step04 bd_step04 validate_step04 step04 \
-        sim_step05 clean help
+        sim_step05 package_step05 bd_step05 validate_step05 step05 clean help
 
 help:
 	@echo "Targets:"
@@ -18,6 +18,10 @@ help:
 	@echo "  validate_step04 Build the block design and validate only, no synthesis (step 04)"
 	@echo "  step04         Build the dot-product overlay bitstream (step 04)"
 	@echo "  sim_step05     Simulate the matrix-vector linear layer (step 05)"
+	@echo "  package_step05 Package linear_layer as a Vivado IP core (step 05)"
+	@echo "  bd_step05      Create the scratch project for GUI block-design work (step 05)"
+	@echo "  validate_step05 Build the block design and validate only, no synthesis (step 05)"
+	@echo "  step05         Build the linear-layer overlay bitstream (step 05)"
 	@echo "  clean          Remove build artifacts"
 
 step01:
@@ -52,6 +56,18 @@ step04: package_step04
 
 sim_step05:
 	bash sim/step05_linear_layer/run_sim.sh
+
+package_step05:
+	bash -c "source $(VIVADO_SETTINGS) && $(VIVADO) -source vivado/step05_linear_layer/package_ip.tcl"
+
+bd_step05: package_step05
+	bash -c "source $(VIVADO_SETTINGS) && $(VIVADO) -source vivado/step05_linear_layer/create_bd_scratch_project.tcl"
+
+validate_step05:
+	bash -c "source $(VIVADO_SETTINGS) && $(VIVADO) -source vivado/step05_linear_layer/build.tcl -tclargs validate"
+
+step05: package_step05
+	bash -c "source $(VIVADO_SETTINGS) && $(VIVADO) -source vivado/step05_linear_layer/build.tcl"
 
 clean:
 	rm -rf build/

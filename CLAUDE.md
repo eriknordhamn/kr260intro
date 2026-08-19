@@ -90,6 +90,9 @@ from the old script and the bitstream won't reflect the session at all.
 - `sw/` — Python host code and PYNQ notebooks/drivers
 - `vivado/` — TCL scripts to recreate the Vivado project; no generated files committed
 - `constraints/` — XDC constraint files
+- `spec/` — one design spec per milestone with custom RTL, `spec/<step>.md`.
+  The contract the design implements and why it has that shape; written
+  alongside the RTL and kept current with it. See "Design specs" below
 - `docs/` — reference docs (board setup, Xilinx tooling, PYNQ internals) — not step-specific, read once and reused across milestones
 - `build/` — everything Vivado generates, gitignored entirely. Per step:
   `build/<step>/_vivado_project/` (scratch project state — runs, cache, IP
@@ -110,6 +113,39 @@ from the old script and the bitstream won't reflect the session at all.
 - The block design's name must match `design_name` in that step's `build.tcl`; the build globs for `<design_name>.bd` and its `.hwh`
 - Bitstreams and `.hwh` files are build artifacts — generate locally, deploy to board manually or via script
 - Every board-side PYNQ script must run through `sw/run_pynq.sh`, not a bare `sudo .../python3`. `sudo` and systemd both skip the login-shell environment PYNQ depends on (`XILINX_XRT`, venv-first `PATH`) — see `docs/pynq-venv.md`. Deploy `run_pynq.sh` alongside each step's driver script and invoke it as `./run_pynq.sh <script.py>`.
+- Any AXI DMA instance gets **Width of Buffer Length Register (`c_sg_length_width`) = 26**. The default is 14, i.e. a 16383-byte cap on a single transfer, and where `TLAST` delimits a packet that cap is hard — a packet cannot be split across two `transfer()` calls without ending it early. See `docs/xilinx-tools.md`
+- Export a block design with `write_bd_tcl -force <abs path>` from the GUI's Tcl Console, never the File → Export dialog. The dialog defaults to the project directory and has silently written there on two milestones while the repo path stayed empty
+- A board-side workaround must **report what it did**, on every path including the one where it does nothing. Two step-05 fixes for PYNQ's stale DMA ceiling failed identically and silently, costing three board round trips to distinguish "didn't apply" from "applied and didn't help"
+
+## Design specs: `spec/<step>.md`
+
+Every milestone that introduces custom RTL gets a spec. It is the reference
+for anyone — including a future session — changing that RTL or writing a
+driver against it, and it is written **with** the design, not after it.
+
+A spec covers: the goal and the explicit non-goals; the module interface
+(ports, parameters) and what changing a parameter obliges you to change
+elsewhere; the stream/register protocol; the numeric contract (widths,
+signedness, truncation or saturation) that any reference model must
+reproduce; what the PS-side driver must guarantee; the microarchitecture in
+enough detail to explain the flow control; the performance and resource
+budget with the bottleneck named; the verification plan and what only
+hardware can cover; and the known limits with what they imply for later
+steps. Alternatives that were considered and rejected belong here too, with
+the reason — that is the part which is otherwise lost.
+
+The three documents divide as:
+
+- **`spec/<step>.md`** — what the design must do, and why it is shaped that
+  way. Durable, kept current, survives the milestone.
+- **`STATUS.md`** — what happened building it: the walkthrough, the gotchas
+  hit, the decisions taken along the way, hardware results. Durable, append
+  a section per milestone, never trimmed.
+- **`TODO_NEXT.md`** — where work stopped and the exact next commands.
+  Ephemeral, rewritten wholesale, deleted when the milestone closes.
+
+When they overlap, the spec states the contract and `STATUS.md` links to it
+rather than restating it.
 
 ## Session Handoff: `TODO_NEXT.md`
 

@@ -72,6 +72,15 @@ Beyond the happy path, the cases that have actually mattered on this project:
 - A **safety timeout** (`initial #N; $display("timeout"); $finish;`) so a
   broken handshake fails the run instead of hanging CI or your terminal.
 
+And once it passes: **check that it can fail.** A testbench that goes green
+on the first run has proved nothing until you have seen it go red. Break the
+RTL deliberately in a scratch copy — drop a `$signed`, remove a state reset,
+invert a condition — and confirm the failure is loud. Step 05 did this with
+three mutations; two were killed, and the third *survived* for a legitimate
+reason (the error landed only in accumulator bits that the output truncates
+away), which was worth learning and is recorded in that step's spec rather
+than papered over.
+
 Note that `xvlog --sv` accepts more SystemVerilog than Vivado's IP packager
 is comfortable with — packaging warns `19-5101` about SystemVerilog top
 files. Keep module *ports and parameters* plain (no packed structs,
@@ -146,9 +155,20 @@ artifact, not the `.xpr`.
    can leave automation with nothing to offer.
 9. **Validate Design.** Expect it to catch unconnected pins; do not expect it
    to catch a missing PS port (see 3).
-10. **File → Export Block Design as TCL**, overwriting
-    `vivado/<step>/<design_name>_bd.tcl`. Commit that script; never the
-    project directory.
+10. **Export the block design as Tcl — from the Tcl Console, not the menu.**
+
+    ```tcl
+    write_bd_tcl -force /abs/path/to/vivado/<step>/<design_name>_bd.tcl
+    ```
+
+    This is the same call *File → Export → Export Block Design as TCL*
+    makes, with the destination stated explicitly. The dialog defaults to
+    the **project directory** and names the file after the block design, so
+    it happily writes `build/<step>/_vivado_project/<bd_name>.tcl` while you
+    believe you exported into the repo. That has now happened on two
+    separate milestones (steps 04 and 05); the console form either writes
+    the path you named or raises a visible error. Commit the script; never
+    the project directory.
 
 ### After the GUI
 
@@ -198,6 +218,23 @@ This matters because an exported script can reference IP that only resolves
 in the project it came from. If `validate` passes from a clean project, the
 design is genuinely reproducible from source.
 
+### Renaming a block design
+
+Vivado offers no way to rename a block design in the GUI. The exported
+script parameterizes it, though — near the top, under a generated comment
+that reads `# CHANGE DESIGN NAME HERE`:
+
+```tcl
+set design_name <name>
+```
+
+Editing that one line is the intended mechanism and is the cheapest fix when
+the BD ended up named differently from `build.tcl`'s `design_name`. Watch
+that the old name is not also a cell or IP name before reaching for a global
+substitution — in step 05 the design, the IP, and the cell were all called
+some form of `linear_layer`, so only the one line could safely change.
+Validate headlessly afterwards.
+
 ### Hand-editing an exported script
 
 The exported Tcl is generated code and is committed close to verbatim, but
@@ -223,6 +260,6 @@ merging by hand.
 - [ ] Connection Automation run until exhausted
 - [ ] Clocks and resets present on every cell
 - [ ] Validate Design clean
-- [ ] Exported over `vivado/<step>/<design_name>_bd.tcl`
+- [ ] Exported with `write_bd_tcl -force <abs path>` from the Tcl Console
 - [ ] `git status` confirms that file actually changed
 - [ ] `make validate_step<NN>` passes from a clean project

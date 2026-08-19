@@ -171,6 +171,25 @@ don't always agree on names. The procedure these apply to is in
   isn't a multiple of the bus width. Don't chase the warning; do add TKEEP
   to a kernel that will ever see a partial beat.
 
+### AXI DMA's buffer length register defaults to 14 bits
+
+*Width of Buffer Length Register* (`c_sg_length_width`) on the AXI DMA
+defaults to **14**, capping any single transfer at `2**14 - 1` = 16383
+bytes. The name is misleading — the `c_sg_` prefix reads like a Scatter
+Gather setting, but it governs Direct Register mode too, which is the mode
+PYNQ's simple `sendchannel`/`recvchannel` API drives.
+
+That default is fine while transfers are a few KB, so steps 03 and 04 never
+noticed. Step 05 hit it the moment a layer's weight packet reached 16384
+bytes — a 4096x2 matrix — and it is a hard cap rather than an inconvenience
+whenever a protocol uses `TLAST` to delimit a packet: each `transfer()` call
+emits its own `TLAST`, so a packet cannot be split across two transfers
+without ending it early.
+
+Set it to **26** (the maximum, 64 MB) unless there is a reason not to. It
+costs a handful of flip-flops in the DMA's length counter, and at 14 bits a
+design is silently limited to layers of about 8191 int16 weights.
+
 ## IP packaging gotchas
 
 From packaging step 04's streaming kernel — the AXI4-Stream equivalents of

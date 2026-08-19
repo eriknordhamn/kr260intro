@@ -39,22 +39,25 @@ print(f"IP cores in overlay: {list(ol.ip_dict.keys())}")
 dma = ol.axi_dma_0
 
 
+# The buffer-length register width this step's block design sets
+# (vivado/step05_linear_layer/linear_layer_accel_bd.tcl, CONFIG.c_sg_length_width).
+# Used only if discovery below finds nothing; keep the two in step.
+BUILD_SG_LENGTH_WIDTH = 26
+
+
 def unlock_dma_transfer_size(overlay, dma, bitfile=BITFILE):
     """Raise PYNQ's transfer-size ceiling to what the DMA actually implements.
 
-    PYNQ derives its limit from the AXI DMA's buffer-length register width,
-    looked up as the *lowercase* key 'c_sg_length_width' in the IP's
-    parameter dict (pynq/lib/dma.py:617), falling back to a 14-bit default
-    when it misses -- a 16383-byte ceiling. This design implements 26 bits,
-    i.e. 64 MB, and both PARAMETER blocks in the .hwh say so.
+    PYNQ derives its limit from the AXI DMA's buffer-length register width
+    (pynq/lib/dma.py:617). On this board its parsed ip_dict has been seen to
+    report a stale 14 -- a 16383-byte ceiling -- while the .hwh sitting next
+    to the bitstream says 26, i.e. 64 MB. So the file is trusted over the
+    parsed dict, and both are printed.
 
-    That ceiling is a Python-side check, not a hardware limit, so correcting
-    it is safe: the width is read back from the same .hwh the bitstream was
-    built with, and limits are only ever raised, never lowered.
-
-    Two places hold the limit and they are not necessarily in sync -- the
-    DMA's buffer_max_size, and each channel's _max_size, which is what
-    transfer() actually tests. Both are checked independently.
+    The ceiling is a Python-side check, not a hardware limit, so raising it
+    to the synthesized register's width is safe. Two places hold it and they
+    are not necessarily in sync: the DMA's buffer_max_size, and each
+    channel's _max_size, which is what transfer() actually tests.
 
     Without this, any layer above M*N = 8191 int16 is rejected before it
     reaches the hardware, and the packet cannot be split around it: each
@@ -62,39 +65,39 @@ def unlock_dma_transfer_size(overlay, dma, bitfile=BITFILE):
     """
     entry = getattr(overlay, "ip_dict", {}).get("axi_dma_0", {}) or {}
     params = entry.get("parameters", {}) or {}
-    width = next((int(v) for k, v in params.items()
-                  if k.lower() == "c_sg_length_width"), None)
+    from_dict = next((v for k, v in params.items()
+                      if k.lower() == "c_sg_length_width"), None)
 
-    if width is None:
-        # Not in the parsed dict -- read it straight out of the .hwh, which
-        # is the same file PYNQ itself parsed and is known to carry it.
-        hwh = os.path.splitext(bitfile)[0] + ".hwh"
-        try:
-            m = re.search(r'NAME="c_sg_length_width"\s+VALUE="(\d+)"',
-                          open(hwh).read(), re.I)
-            width = int(m.group(1)) if m else None
-        except OSError:
-            width = None
-        if params or width is not None:
-            print(f"note: c_sg_length_width not in ip_dict "
-                  f"(entry keys: {sorted(entry)}); read {width} from {hwh}")
+    hwh = os.path.splitext(bitfile)[0] + ".hwh"
+    try:
+        m = re.search(r'NAME="c_sg_length_width"\s+VALUE="(\d+)"',
+                      open(hwh).read(), re.I)
+        from_hwh = m.group(1) if m else None
+    except OSError as exc:
+        from_hwh = f"<{type(exc).__name__}>"
 
-    if width is None:
-        return
+    width = None
+    for candidate in (from_hwh, from_dict, BUILD_SG_LENGTH_WIDTH):
+        if str(candidate).isdigit():
+            width = int(candidate)
+            break
+
+    def limits():
+        return (getattr(dma, "buffer_max_size", None),
+                getattr(dma.sendchannel, "_max_size", None),
+                getattr(dma.recvchannel, "_max_size", None))
 
     hw_max = (1 << width) - 1
-    raised = []
-    if getattr(dma, "buffer_max_size", hw_max) < hw_max:
-        raised.append(f"buffer_max_size {dma.buffer_max_size}")
+    print(f"DMA ceiling: hwh={from_hwh} ip_dict={from_dict} -> using {width} bits "
+          f"({hw_max} bytes); limits before {limits()}")
+
+    if getattr(dma, "buffer_max_size", 0) < hw_max:
         dma.buffer_max_size = hw_max
     for name in ("sendchannel", "recvchannel"):
         ch = getattr(dma, name, None)
         if ch is not None and getattr(ch, "_max_size", hw_max) < hw_max:
-            raised.append(f"{name}._max_size {ch._max_size}")
             ch._max_size = hw_max
-    if raised:
-        print(f"note: raised DMA ceiling to {hw_max} bytes "
-              f"(c_sg_length_width={width}); was {', '.join(raised)}")
+    print(f"             limits after  {limits()}")
 
 
 unlock_dma_transfer_size(ol, dma)

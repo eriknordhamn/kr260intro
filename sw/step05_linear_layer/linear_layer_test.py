@@ -34,6 +34,51 @@ print(f"IP cores in overlay: {list(ol.ip_dict.keys())}")
 
 dma = ol.axi_dma_0
 
+
+def unlock_dma_transfer_size(overlay, dma):
+    """Raise PYNQ's transfer-size ceiling to what the DMA actually implements.
+
+    PYNQ derives its limit from the AXI DMA's buffer-length register width,
+    looked up as the *lowercase* key 'c_sg_length_width' in the IP's
+    parameter dict (see pynq/lib/dma.py). Vivado 2025.1 writes both an
+    uppercase and a lowercase PARAMETER block into the .hwh; when the dict
+    PYNQ builds carries the uppercase names, that lookup misses and PYNQ
+    falls back to a 14-bit default -- a 16383-byte ceiling -- even though
+    this design implements 26 bits, i.e. 64 MB.
+
+    That ceiling is a Python-side check, not a hardware one, so correcting
+    it is safe: the width is read back from the same .hwh the bitstream was
+    built with, and the ceiling is only ever raised, never lowered.
+
+    Without this, the weight packet for any layer above M*N = 8191 int16 is
+    rejected before it reaches the hardware -- and the packet cannot be
+    split, because each transfer() emits its own TLAST and TLAST is what
+    delimits the packet.
+    """
+    params = getattr(overlay, "ip_dict", {}).get("axi_dma_0", {}).get("parameters", {})
+    width = next((int(v) for k, v in params.items()
+                  if k.lower() == "c_sg_length_width"), None)
+    if width is None:
+        if params:
+            # The .hwh carries this parameter, so not finding it here means
+            # PYNQ's parameter dict is shaped differently than assumed --
+            # say so rather than silently leaving the ceiling in place.
+            print("note: c_sg_length_width absent from PYNQ's parameter dict; "
+                  f"{len(params)} params seen, e.g. {sorted(params)[:4]}")
+        return
+    hw_max = (1 << width) - 1
+    if getattr(dma, "buffer_max_size", hw_max) >= hw_max:
+        return
+    print(f"note: raising PYNQ's DMA transfer ceiling "
+          f"{dma.buffer_max_size} -> {hw_max} bytes (c_sg_length_width={width})")
+    dma.buffer_max_size = hw_max
+    for ch in (dma.sendchannel, dma.recvchannel):
+        if hasattr(ch, "_max_size"):
+            ch._max_size = hw_max
+
+
+unlock_dma_transfer_size(ol, dma)
+
 # Operands are drawn from +/-2**14 so that a 1024-wide row's sum comfortably
 # exceeds 2**32 — that is what exercises the truncation on the way out,
 # rather than letting the test pass on small numbers alone.

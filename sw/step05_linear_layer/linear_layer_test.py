@@ -22,59 +22,79 @@ in the same directory, via run_pynq.sh.
 """
 from pynq import Overlay, allocate
 import numpy as np
+import os
+import re
 import time
 
 LANES  = 8           # int16 operands per 128-bit beat
 MAX_N  = 4096        # vector cache depth in the kernel
 MASK32 = 0xFFFFFFFF
 
-ol = Overlay("linear_layer_accel.bit")
+BITFILE = "linear_layer_accel.bit"
+
+ol = Overlay(BITFILE)
 print("Overlay loaded successfully.")
 print(f"IP cores in overlay: {list(ol.ip_dict.keys())}")
 
 dma = ol.axi_dma_0
 
 
-def unlock_dma_transfer_size(overlay, dma):
+def unlock_dma_transfer_size(overlay, dma, bitfile=BITFILE):
     """Raise PYNQ's transfer-size ceiling to what the DMA actually implements.
 
     PYNQ derives its limit from the AXI DMA's buffer-length register width,
     looked up as the *lowercase* key 'c_sg_length_width' in the IP's
-    parameter dict (see pynq/lib/dma.py). Vivado 2025.1 writes both an
-    uppercase and a lowercase PARAMETER block into the .hwh; when the dict
-    PYNQ builds carries the uppercase names, that lookup misses and PYNQ
-    falls back to a 14-bit default -- a 16383-byte ceiling -- even though
-    this design implements 26 bits, i.e. 64 MB.
+    parameter dict (pynq/lib/dma.py:617), falling back to a 14-bit default
+    when it misses -- a 16383-byte ceiling. This design implements 26 bits,
+    i.e. 64 MB, and both PARAMETER blocks in the .hwh say so.
 
-    That ceiling is a Python-side check, not a hardware one, so correcting
+    That ceiling is a Python-side check, not a hardware limit, so correcting
     it is safe: the width is read back from the same .hwh the bitstream was
-    built with, and the ceiling is only ever raised, never lowered.
+    built with, and limits are only ever raised, never lowered.
 
-    Without this, the weight packet for any layer above M*N = 8191 int16 is
-    rejected before it reaches the hardware -- and the packet cannot be
-    split, because each transfer() emits its own TLAST and TLAST is what
-    delimits the packet.
+    Two places hold the limit and they are not necessarily in sync -- the
+    DMA's buffer_max_size, and each channel's _max_size, which is what
+    transfer() actually tests. Both are checked independently.
+
+    Without this, any layer above M*N = 8191 int16 is rejected before it
+    reaches the hardware, and the packet cannot be split around it: each
+    transfer() emits its own TLAST, and TLAST is what delimits the packet.
     """
-    params = getattr(overlay, "ip_dict", {}).get("axi_dma_0", {}).get("parameters", {})
+    entry = getattr(overlay, "ip_dict", {}).get("axi_dma_0", {}) or {}
+    params = entry.get("parameters", {}) or {}
     width = next((int(v) for k, v in params.items()
                   if k.lower() == "c_sg_length_width"), None)
+
     if width is None:
-        if params:
-            # The .hwh carries this parameter, so not finding it here means
-            # PYNQ's parameter dict is shaped differently than assumed --
-            # say so rather than silently leaving the ceiling in place.
-            print("note: c_sg_length_width absent from PYNQ's parameter dict; "
-                  f"{len(params)} params seen, e.g. {sorted(params)[:4]}")
+        # Not in the parsed dict -- read it straight out of the .hwh, which
+        # is the same file PYNQ itself parsed and is known to carry it.
+        hwh = os.path.splitext(bitfile)[0] + ".hwh"
+        try:
+            m = re.search(r'NAME="c_sg_length_width"\s+VALUE="(\d+)"',
+                          open(hwh).read(), re.I)
+            width = int(m.group(1)) if m else None
+        except OSError:
+            width = None
+        if params or width is not None:
+            print(f"note: c_sg_length_width not in ip_dict "
+                  f"(entry keys: {sorted(entry)}); read {width} from {hwh}")
+
+    if width is None:
         return
+
     hw_max = (1 << width) - 1
-    if getattr(dma, "buffer_max_size", hw_max) >= hw_max:
-        return
-    print(f"note: raising PYNQ's DMA transfer ceiling "
-          f"{dma.buffer_max_size} -> {hw_max} bytes (c_sg_length_width={width})")
-    dma.buffer_max_size = hw_max
-    for ch in (dma.sendchannel, dma.recvchannel):
-        if hasattr(ch, "_max_size"):
+    raised = []
+    if getattr(dma, "buffer_max_size", hw_max) < hw_max:
+        raised.append(f"buffer_max_size {dma.buffer_max_size}")
+        dma.buffer_max_size = hw_max
+    for name in ("sendchannel", "recvchannel"):
+        ch = getattr(dma, name, None)
+        if ch is not None and getattr(ch, "_max_size", hw_max) < hw_max:
+            raised.append(f"{name}._max_size {ch._max_size}")
             ch._max_size = hw_max
+    if raised:
+        print(f"note: raised DMA ceiling to {hw_max} bytes "
+              f"(c_sg_length_width={width}); was {', '.join(raised)}")
 
 
 unlock_dma_transfer_size(ol, dma)

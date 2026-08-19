@@ -72,6 +72,15 @@ Beyond the happy path, the cases that have actually mattered on this project:
 - A **safety timeout** (`initial #N; $display("timeout"); $finish;`) so a
   broken handshake fails the run instead of hanging CI or your terminal.
 
+And once it passes: **check that it can fail.** A testbench that goes green
+on the first run has proved nothing until you have seen it go red. Break the
+RTL deliberately in a scratch copy — drop a `$signed`, remove a state reset,
+invert a condition — and confirm the failure is loud. Step 05 did this with
+three mutations; two were killed, and the third *survived* for a legitimate
+reason (the error landed only in accumulator bits that the output truncates
+away), which was worth learning and is recorded in that step's spec rather
+than papered over.
+
 Note that `xvlog --sv` accepts more SystemVerilog than Vivado's IP packager
 is comfortable with — packaging warns `19-5101` about SystemVerilog top
 files. Keep module *ports and parameters* plain (no packed structs,

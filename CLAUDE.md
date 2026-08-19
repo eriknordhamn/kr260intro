@@ -113,6 +113,9 @@ from the old script and the bitstream won't reflect the session at all.
 - The block design's name must match `design_name` in that step's `build.tcl`; the build globs for `<design_name>.bd` and its `.hwh`
 - Bitstreams and `.hwh` files are build artifacts — generate locally, deploy to board manually or via script
 - Every board-side PYNQ script must run through `sw/run_pynq.sh`, not a bare `sudo .../python3`. `sudo` and systemd both skip the login-shell environment PYNQ depends on (`XILINX_XRT`, venv-first `PATH`) — see `docs/pynq-venv.md`. Deploy `run_pynq.sh` alongside each step's driver script and invoke it as `./run_pynq.sh <script.py>`.
+- Any AXI DMA instance gets **Width of Buffer Length Register (`c_sg_length_width`) = 26**. The default is 14, i.e. a 16383-byte cap on a single transfer, and where `TLAST` delimits a packet that cap is hard — a packet cannot be split across two `transfer()` calls without ending it early. See `docs/xilinx-tools.md`
+- Export a block design with `write_bd_tcl -force <abs path>` from the GUI's Tcl Console, never the File → Export dialog. The dialog defaults to the project directory and has silently written there on two milestones while the repo path stayed empty
+- A board-side workaround must **report what it did**, on every path including the one where it does nothing. Two step-05 fixes for PYNQ's stale DMA ceiling failed identically and silently, costing three board round trips to distinguish "didn't apply" from "applied and didn't help"
 
 ## Design specs: `spec/<step>.md`
 

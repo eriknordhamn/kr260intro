@@ -169,6 +169,52 @@ Output: `Overlay loaded successfully.` / `IP cores in overlay:
 
 ---
 
+## Issue Log: `insert_dtbo.py` traceback after an Ubuntu upgrade
+
+2026-08-19, between steps 04 and 05. After `sudo apt update && sudo apt
+upgrade` and a reboot, every login printed a traceback from
+`/usr/local/share/pynq-venv/pynq-dts/insert_dtbo.py` — the device-tree
+overlay insert that `/etc/profile.d/pynq_venv.sh` runs on *every login
+shell*, not something our own scripts invoke.
+
+The upgrade did include a new kernel, which made this look serious: two
+things PYNQ depends on are kernel-bound. The configfs overlay interface
+`insert_dtbo.py` writes into is a Xilinx downstream patch that a generic
+Ubuntu kernel lacks, and `zocl` is XRT's kernel module. Either going missing
+would break bitstream loading outright.
+
+Neither had. What the board actually showed:
+
+```
+uname -r                              -> 5.15.0-1077-xilinx-zynqmp   (right flavour)
+ls /sys/kernel/config/device-tree/    -> overlays                    (interface present)
+lsmod | grep zocl                     -> zocl 204800 0               (loaded)
+ls .../device-tree/overlays/          -> k26-starter-kits_image_1  pynq
+dmesg | grep -i overlay               -> only "memory leak will occur if
+                                         overlay removed" warnings, which are
+                                         what the kernel always says when an
+                                         overlay adds properties
+bash -lc true                         -> clean, no traceback
+```
+
+`dkms` not being installed is also normal here — `zocl` ships prebuilt with
+the Kria kernel package rather than being built from source, so there is
+nothing for DKMS to rebuild.
+
+**Conclusion: a one-time failure on the first login after reboot, most
+likely `insert_dtbo.py` racing the starter-kit firmware overlay or the FPGA
+manager while they were still settling.** A later login inserted the overlay
+successfully (dmesg timestamps it at t=41s) and every login since has been
+clean. Step 05's full hardware test passed on this kernel afterwards.
+
+Recorded as unconfirmed rather than solved: the original traceback text was
+not captured, and without its exception line the race is inference, not
+proof. If it recurs, grab that line first. The standing recommendation —
+now in `docs/board-setup.md` — is to `apt-mark hold` the kernel packages,
+since surviving this particular bump was luck rather than design.
+
+---
+
 ## Completed Steps
 
 - **Step 01 — Environment / Hello Overlay.** Vivado build → PYNQ install via

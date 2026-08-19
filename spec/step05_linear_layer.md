@@ -4,7 +4,7 @@ Design spec for the `linear_layer` kernel: the contract it implements, the
 reasoning behind that contract, and how it is verified. This is the document
 to read before changing the RTL or writing a driver against it.
 
-Status: RTL and testbench complete and passing; block design and hardware
+Status: RTL, testbench, block design and bitstream complete; hardware
 verification outstanding.
 
 ---
@@ -194,8 +194,9 @@ about. At the defaults it is 128 bits × 512 words = **2 BRAM36 of 144**.
 | Peak | ~800 MMAC/s |
 | Cycles per layer | `N/8` (vector load) + `M · (N/8 + 1)` |
 | Example: 256×256 | ~8.4k cycles ≈ **84 µs** |
-| DSP48E2 | 8 of 1248 |
-| BRAM36 | 2 of 144 |
+| DSP48E2 | 8 of 1248 — **measured 8** |
+| BRAM36 | 2 of 144 for the cache — **measured 3.5 tiles** for the whole design, cache plus the DMA's FIFOs |
+| Timing | **WNS +2.013 ns** at 100 MHz, hold +0.010 ns, all constraints met |
 
 **The stream is the bottleneck, not the arithmetic.** A 128-bit beat per
 cycle at 100 MHz is 1.6 GB/s, which is exactly 8 int16 operands per cycle —
@@ -281,4 +282,8 @@ benign, for the reason recorded in `docs/xilinx-tools.md`.
 - **Parallelism is stream-limited.** More lanes need a wider stream or a
   faster PL clock first (§7).
 - **One clock domain** at ~100 MHz. Raising the PL clock is the cheapest
-  remaining throughput lever and costs no RTL change.
+  remaining throughput lever, but only to a point: the implemented design
+  closes with **WNS +2.013 ns** on a 10 ns period, i.e. a critical path of
+  ~8 ns, so it reaches roughly **125 MHz** with no RTL change and no
+  further. Past that the adder tree and accumulator need a pipeline stage,
+  which also means carrying the row-end flags one stage deeper.

@@ -1,37 +1,22 @@
 # Project Status
 
-## Current Step: 04 — Dot Product Kernel — IN PROGRESS
+## Current Step: 05 — Linear Layer — NOT STARTED
+
+Matrix-vector multiply — the core of a dense NN layer. Design not chosen
+yet; the open questions are how the weight matrix reaches the PL (streamed
+alongside the vector as in step 04, preloaded into BRAM, or a second DMA
+channel) and whether rows are computed serially by one dot-product engine
+or in parallel by a MAC array.
+
+## Step 04 — Dot Product Kernel — COMPLETE
 
 First real compute in the PL. A streaming dot-product kernel sits where step
 03 looped the DMA's `M_AXIS_MM2S` straight back into its `S_AXIS_S2MM`. Both
 operand vectors arrive interleaved on the single stream (`a0 b0 a1 b1 …`,
 `TLAST` on the final beat), so the vector length is implicit in the packet
 and the IP needs no control interface at all — no AXI4-Lite, no registers.
-
-Chosen over a second DMA channel or AXI-Lite-loaded weights because it reuses
-step 03's block design almost verbatim; the pairing convention is the only
-artificial part, and step 05 will revisit it when a matrix needs real operand
-bandwidth.
-
-**Done and verified:**
-- `rtl/step04_dot_product/dot_product.sv` — AXI4-Stream in/out, signed
-  multiply into a 64-bit accumulator, one result beat per packet
-- `sim/step04_dot_product/` — self-checking testbench, all 10 checks pass
-  under xsim: signed operands, `TVALID` gaps, randomized backpressure,
-  back-to-back packets, 1024 pairs, and a malformed odd-beat packet
-- `vivado/step04_dot_product/package_ip.tcl` — packages clean as
-  `kr260intro.local:user:dot_product:1.0`
-
-**Outstanding:**
-- Block design — to be built in the GUI and exported;
-  `dot_product_accel_bd.tcl` currently holds an unvalidated hand-edited copy
-  of step 03's export, to be overwritten by the export
-- `build.tcl` / `create_bd_scratch_project.tcl` — written, never run
-- `sw/step04_dot_product/` — not started
-- Hardware verification on the board
-
-`TODO_NEXT.md` carries the full handoff state, the step-04 GUI click-path,
-and the design decisions worth reviewing.
+Built to a bitstream, deployed, and verified on the KR260:
+`dot_product_test.py` printed `Step 04 PASS`. See the walkthrough below.
 
 ## Step 03 — DMA Loopback — COMPLETE
 
@@ -191,6 +176,12 @@ Output: `Overlay loaded successfully.` / `IP cores in overlay:
   RTL — validates the bulk-transfer path ahead of step 04's compute
   kernel. Verified on hardware — `dma_loopback_test.py` DMA'd a
   1024-word buffer PS→PL→PS and printed `Step 03 PASS`. See the
+  walkthrough below.
+
+- **Step 04 — Dot Product Kernel.** First compute in the PL: a streaming
+  dot-product kernel between the DMA's MM2S and S2MM channels, operands
+  interleaved on one stream, length implicit in `TLAST`. Verified on
+  hardware — `dot_product_test.py` printed `Step 04 PASS`. See the
   walkthrough below.
 
 ---
@@ -400,10 +391,150 @@ Step 03 PASS
 
 ---
 
+## Step 04 walkthrough: Dot Product Kernel
+
+Goal: put real arithmetic in the stream path step 03 proved out. The DMA
+loopback wire is cut and the kernel dropped in between, so a buffer read out
+of DDR is *processed* on its way back rather than merely copied.
+
+```
+rtl/step04_dot_product/dot_product.sv              the kernel
+sim/step04_dot_product/tb_dot_product.sv           self-checking testbench (10 checks)
+vivado/step04_dot_product/package_ip.tcl           packages the kernel as an IP core
+vivado/step04_dot_product/dot_product_accel_bd.tcl PS + AXI DMA + kernel block design
+vivado/step04_dot_product/build.tcl                ties it together -> .bit + .hwh
+sw/step04_dot_product/dot_product_test.py          PYNQ driver (board-side)
+```
+
+### Interface: no control interface
+
+Both operand vectors arrive interleaved on the single MM2S stream:
+
+```
+beat:  0   1   2   3        2N-2   2N-1
+data:  a0  b0  a1  b1  ...  a[N-1] b[N-1](TLAST)
+                 |
+                 v
+out:   sum(TLAST)     one beat, S2MM writes 4 bytes back to DDR
+```
+
+Vector length is implicit in `TLAST`, so the IP has **no registers and no
+AXI4-Lite port at all** — the entire block design is step 03's with the
+loopback wire cut. Chosen over a second DMA channel or AXI-Lite-loaded
+weights precisely because it reuses step 03's design almost verbatim; the
+pairing convention is the artificial part, and step 05 revisits it when a
+matrix needs real operand bandwidth.
+
+### RTL — `rtl/step04_dot_product/dot_product.sv`
+
+Even beats latch an `a`, odd beats supply the matching `b`, multiply signed,
+and accumulate into a 64-bit register. `TLAST` emits the accumulator's low 32
+bits as one output beat (also marked `TLAST`, which is what tells S2MM the
+transfer is done) and clears the accumulator, so back-to-back packets are
+independent. Two deliberate choices worth remembering:
+
+- `s_axis_tready = !m_axis_tvalid` — the input stalls only while a result is
+  waiting to be drained, and is **not** a function of `m_axis_tready`. That
+  keeps a combinational path from running downstream `TREADY` into upstream
+  `TREADY`. Costs one cycle at end-of-packet, nothing in steady state.
+- A malformed packet (`TLAST` on an even beat, so the last `a` has no `b`)
+  discards the dangling element and emits the accumulator anyway. Flushing
+  beats hanging: a stalled kernel would wedge the DMA channel with no error
+  visible to the PS.
+
+Step 04 predates the project's SystemVerilog convention and is Verilog-2001
+throughout (`reg`/`wire`, bare `always @(posedge …)`).
+
+### Simulation — `sim/step04_dot_product/`
+
+Ten self-checking cases under xsim, all passing: signed operands, `TVALID`
+gaps, randomized backpressure, back-to-back packets, 1024 pairs, and the
+malformed odd-beat packet.
+
+### Block design — the export that never landed
+
+`dot_product_accel_bd.tcl` is **a hand-edited copy of step 03's export, not
+a GUI export**. The GUI session's *File → Export Block Design as TCL* never
+wrote the file — it stayed at its pre-session mtime and unchanged in git —
+and `build.tcl` sources the committed script, so the bitstream was built from
+the hand-edit.
+
+That was caught and checked rather than assumed. Comparing the scratch
+project's `dot_product_accel.bd` against the committed TCL:
+
+- same 6 cells: `zynq_ultra_ps_e_0`, `axi_dma_0`, `dot_product_0`, `axi_smc`,
+  `axi_smc_1`, `rst_ps8_0_99M`
+- all 8 interface nets identical, including `M_AXIS_MM2S → s_axis`,
+  `m_axis → S_AXIS_S2MM`, and `axi_smc_1/M00_AXI → S_AXI_HPC0_FPD`
+- `c_include_sg = 0` in both
+
+The committed script is therefore trustworthy and the design reproducible
+from source. **Decision: left alone** — re-exporting would overwrite a
+known-good, now hardware-validated file with a functionally identical one.
+The general lesson (confirm with `git status` that an export actually landed)
+is now a rule in `CLAUDE.md` and a checklist item in
+`docs/vivado-gui-session.md`.
+
+Synthesis emits one warning worth recognising rather than chasing:
+`[Synth 8-7071] port 'm_axis_mm2s_tkeep' … is unconnected` — the kernel has
+no `TKEEP` input, so the DMA's output has nowhere to go. Benign for a stream
+where every beat carries all four bytes. Written up in
+`docs/xilinx-tools.md`.
+
+### `sw/step04_dot_product/dot_product_test.py`
+
+Same buffer discipline as step 03 (`pynq.allocate()`, receive channel armed
+before the send channel), with the operands interleaved into one send buffer
+via `send_buf[0::2] = a` / `send_buf[1::2] = b`. Test design worth keeping:
+
+- operands drawn from ±2**15 so a 1024-element sum comfortably exceeds
+  2**32 — that is what actually exercises the output truncation, instead of
+  passing on small numbers
+- the reference sum is computed with Python ints, not numpy: 1024 products of
+  ~2**30 risk overflowing int64 accumulation, and a silently wrapped
+  reference would "confirm" a wrapped result
+- negative operands throughout — an unsigned multiply passes an all-positive
+  test perfectly
+- three back-to-back packets with no reload, proving the accumulator really
+  clears on `TLAST`
+
+Before the board run, the driver was verified off-board by stubbing PYNQ with
+a model of the RTL's semantics and running the real script against it. That
+validated the interleaving, the truncation masking, and the numpy/PYNQ API
+usage — and nothing about DMA arming, cache coherency on HPC0, or whether
+`TLAST` actually arrives. Those only the board can answer, and it did.
+
+**Verified on hardware:** `./run_pynq.sh dot_product_test.py` — all five
+lengths (n = 1, 2, 8, 64, 1024) and all three back-to-back packets matched,
+ending in `Step 04 PASS`.
+
+### Makefile targets
+
+| Target | Does |
+|---|------|
+| `make sim_step04` | Standalone xsim testbench run |
+| `make package_step04` | Packages the kernel into `build/step04_dot_product/ip_repo/` |
+| `make bd_step04` | Scratch project for GUI block-design work |
+| `make validate_step04` | Sources + validates the block design only (~1 min) |
+| `make step04` | Full bitstream build |
+
+### Deferred deliberately
+
+Simulating the whole block design with the **Zynq UltraScale+ VIP**
+(`set_property SELECTED_SIM_MODEL tlm [get_bd_cells /zynq_ultra_ps_e_0]`)
+would run the full PS→DMA→kernel→DMA→PS round trip in xsim, catching wiring
+and DMA-behaviour bugs the unit testbench cannot. It sees nothing above the
+AXI layer, though — PYNQ buffers, cache coherency, and channel arming order
+stay invisible — and it costs a project-based `launch_simulation` flow rather
+than the standalone `xvlog`/`xelab` one. Step 04 passed on the first board
+run, so it was never needed. Build it on a *second* unexplained board
+failure, not the first.
+
+---
+
 ## Upcoming Steps
 
 | # | Goal |
 |---|------|
-| 5 | Linear layer — matrix-vector multiply |
 | 6 | Activation + chaining — ReLU, layer fusion |
 | 7 | ML inference — full MLP end-to-end |

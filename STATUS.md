@@ -1,12 +1,21 @@
 # Project Status
 
-## Current Step: 05 — Linear Layer — NOT STARTED
+## Current Step: 06 — Activation + Chaining — NOT STARTED
 
-Matrix-vector multiply — the core of a dense NN layer. Design not chosen
-yet; the open questions are how the weight matrix reaches the PL (streamed
-alongside the vector as in step 04, preloaded into BRAM, or a second DMA
-channel) and whether rows are computed serially by one dot-product engine
-or in parallel by a MAC array.
+ReLU (or similar) in the PL, and layer-to-layer data flow that stays in the
+fabric instead of returning to the PS between layers. Step 05's timings make
+the case for it: every invocation costs ~0.55 ms of fixed host overhead
+regardless of size, so chaining is worth more than any kernel speedup.
+
+## Step 05 — Linear Layer — COMPLETE
+
+Matrix-vector multiply, 8 int16 lanes per 128-bit beat = 8 MACs/cycle. Two
+input packets (vector, then weight rows) with the vector cached in BRAM and
+N learned from the first packet's beat count, so the IP still needs no
+AXI4-Lite interface. Built, deployed and verified on the KR260:
+`linear_layer_test.py` printed `Step 05 PASS` across eleven cases. The
+design contract is `spec/step05_linear_layer.md`; the walkthrough below
+covers what happened building it.
 
 ## Step 04 — Dot Product Kernel — COMPLETE
 
@@ -183,6 +192,14 @@ Output: `Overlay loaded successfully.` / `IP cores in overlay:
   interleaved on one stream, length implicit in `TLAST`. Verified on
   hardware — `dot_product_test.py` printed `Step 04 PASS`. See the
   walkthrough below.
+
+- **Step 05 — Linear Layer.** Matrix-vector multiply at 8 MACs/cycle over a
+  128-bit stream, vector cached in BRAM, dimensions implicit in the packet
+  structure. Verified on hardware — `linear_layer_test.py` printed
+  `Step 05 PASS`. Two Xilinx/PYNQ defaults cost the most time here and are
+  now in `docs/`: the DMA's 14-bit buffer-length register, and PYNQ's
+  `ip_dict` serving a stale parameter value. See the walkthrough below and
+  `spec/step05_linear_layer.md`.
 
 ---
 
@@ -532,9 +549,160 @@ failure, not the first.
 
 ---
 
+## Step 05 walkthrough: Linear Layer
+
+Goal: the arithmetic core of a dense NN layer, y = W·x, and the first step to
+go faster than one MAC per cycle.
+
+The **contract — protocol, numeric semantics, driver obligations, resource
+budget — lives in `spec/step05_linear_layer.md`**, which was written
+alongside the RTL. This section is what happened building it and is not a
+restatement of that document.
+
+```
+rtl/step05_linear_layer/linear_layer.sv          the kernel
+sim/step05_linear_layer/tb_linear_layer.sv       self-checking TB (11 cases)
+spec/step05_linear_layer.md                      the design spec
+vivado/step05_linear_layer/                      package_ip / scratch project / build
+sw/step05_linear_layer/linear_layer_test.py      PYNQ driver (board-side)
+```
+
+### The decision that shaped everything: the stream is the bottleneck
+
+int16 was chosen over floating point after establishing that the ZU5EV has
+no hardened FP — the DSP48E2 is a fixed-point block, and an FP MAC would be
+assembled from DSPs plus fabric, with an accumulator loop whose multi-cycle
+adder latency forces interleaved partial sums and costs bit-exact
+verification against a Python reference.
+
+More importantly, at 128 bits per beat and ~100 MHz the DMA delivers exactly
+8 int16 operands per cycle, so a single 8-lane MAC array consumes the entire
+stream. Widening the array further would idle. That is why step 05 is 8
+lanes and not 16 or 32, and why the next throughput lever is a wider stream
+or a faster clock rather than more multipliers.
+
+### Verification: the testbench was made to fail on purpose
+
+Eleven self-checking cases passed on the first run, which is not by itself
+evidence of anything. Three deliberate mutations of the RTL established that
+the testbench has teeth:
+
+| Mutation | Result |
+|---|---|
+| Drop `$signed` on one lane operand | Killed — 12 checks fail |
+| Remove the accumulator reset at row end | Killed — 11 checks fail |
+| Declare `prod2` unsigned | **Survived** |
+
+The survivor is worth understanding rather than patching around. Zero- vs
+sign-extending a negative product perturbs the 48-bit accumulator by exactly
+2**32, and the output beat is `acc[31:0]` — so the error lands entirely in
+bits the protocol already discards, and no black-box test can see it. The
+declaration was left correct anyway: it becomes load-bearing the moment a
+result is requantized with a right shift, which is what step 06/07 needs.
+
+### Implementation
+
+Clean build: 8 DSP48E2 of 1248 exactly as predicted, 3.5 BRAM tiles for the
+whole design, WNS **+2.013 ns** at 100 MHz, zero critical warnings. The
+~8 ns critical path means this closes at roughly 125 MHz with no RTL change
+and no further — the spec's throughput note was corrected to say so.
+
+### The GUI export silently didn't land — again
+
+`File → Export Block Design as TCL` wrote
+`build/step05_linear_layer/_vivado_project/linear_layer.tcl` — the project
+directory, named after the block design — while the repo path stayed empty.
+Identical to step 04, and only caught because `git status` is now a
+mandatory post-GUI check.
+
+`docs/vivado-gui-session.md` now prescribes the Tcl Console instead:
+
+```tcl
+write_bd_tcl -force /abs/path/to/vivado/<step>/<design_name>_bd.tcl
+```
+
+Same call, explicit destination, and it errors visibly rather than writing
+somewhere else. The first export also captured Scatter Gather still enabled
+and an unused `M_AXI_HPM1_FPD`; both were fixed in a second GUI pass rather
+than hand-patched, so the committed script is a genuine export. Vivado
+cannot rename a block design, so the BD kept the name `linear_layer` and the
+exported script's `set design_name` line — which Vivado itself labels
+`# CHANGE DESIGN NAME HERE` — was edited to `linear_layer_accel` and
+validated headlessly.
+
+### Two defaults that cost the most time
+
+Both are now in `docs/`, because neither is step-specific.
+
+**1. The AXI DMA's buffer length register defaults to 14 bits.** A
+16383-byte cap on any single transfer. Step 05 hit it at exactly 16384 bytes
+(a 4096×2 layer). It is a *hard* cap for this protocol, not an
+inconvenience: `TLAST` delimits the weight packet and each `transfer()` call
+emits its own, so splitting a layer across two transfers would end a row
+early and desynchronise every row after it. Raised to 26 bits (64 MB) —
+one line in the BD script, validated, rebuilt.
+
+**2. PYNQ's `ip_dict` served a stale value.** After the rebuild the `.hwh`
+on the board read 26 in both its uppercase and lowercase `PARAMETER` blocks,
+and PYNQ *still* enforced 16383. The driver's diagnostic settled it:
+
+```
+DMA ceiling: hwh=26 ip_dict=14 -> using 26 bits (67108863 bytes)
+             limits before (16383, 16383, 16383)
+             limits after  (67108863, 67108863, 67108863)
+```
+
+`ol.ip_dict['axi_dma_0']['parameters']['c_sg_length_width']` returned the
+*previous* build's 14, and `pynq/lib/dma.py` computes its ceiling from that.
+Probable cause is PYNQ's PL server caching parsed metadata keyed on an
+overlay name that didn't change; unconfirmed, since the workaround made it
+moot.
+
+Two failed fixes preceded the working one, and both failed the same way —
+silently. The first gated everything on `dma.buffer_max_size` and returned
+before touching `sendchannel._max_size`, which is what `transfer()` actually
+tests. The second trusted `ip_dict` over the file. The lesson worth keeping:
+**a workaround that can silently do nothing will**, so
+`unlock_dma_transfer_size()` now prefers the `.hwh`, falls back to `ip_dict`
+and then to a constant matching the block design, and prints what it found
+either way.
+
+### Verified on hardware
+
+```
+DMA ceiling: hwh=26 ip_dict=14 -> using 26 bits (67108863 bytes)
+PASS minimal          N=8    M=1     PASS reload 1      N=32   M=2
+PASS single-beat rows N=8    M=4     PASS reload 2      N=512  M=2
+PASS small            N=64   M=4     PASS reload 3      N=128  M=6
+PASS medium           N=256  M=8     PASS truncating    N=1024 M=4
+PASS unaligned N=100  N=100  M=3     PASS max vector    N=4096 M=2
+PASS unaligned N=1    N=1    M=2
+Step 05 PASS
+```
+
+The cases earn their place: the unaligned ones exercise the driver's
+zero-padding (the contract most likely to be got wrong), the three reloads
+prove the kernel returns to its vector-loading state with a re-learned row
+length and no reset, and `truncating` confirms the 48→32-bit truncation
+matches a Python-int reference.
+
+### Performance: host overhead dominates, by two orders of magnitude
+
+Every case took **~0.55 ms wall clock regardless of size** — `allocate` plus
+two `transfer`/`wait` round trips. The largest, 4096×2 = 8192 MACs, is
+1024 cycles ≈ 10 µs of actual compute inside 560 µs, i.e. under 2% duty
+cycle. The best figure measured was 15 MMAC/s against a ~800 MMAC/s kernel
+ceiling.
+
+This is the single most useful number step 05 produced, and it points
+straight at step 06: chaining layers in the fabric, so one host round trip
+covers a whole network rather than one layer, is worth far more than any
+amount of kernel optimisation.
+
+---
+
 ## Upcoming Steps
 
 | # | Goal |
 |---|------|
-| 6 | Activation + chaining — ReLU, layer fusion |
 | 7 | ML inference — full MLP end-to-end |

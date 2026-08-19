@@ -4,8 +4,8 @@ Design spec for the `linear_layer` kernel: the contract it implements, the
 reasoning behind that contract, and how it is verified. This is the document
 to read before changing the RTL or writing a driver against it.
 
-Status: RTL, testbench, block design and bitstream complete; hardware
-verification outstanding.
+Status: **complete and verified on hardware** (2026-08-19) —
+`linear_layer_test.py` printed `Step 05 PASS` across eleven cases.
 
 ---
 

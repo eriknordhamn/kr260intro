@@ -121,6 +121,38 @@ step 03's DMA driver, etc.) should be run the same way — deploy the
 script to the board alongside `run_pynq.sh` and invoke it through the
 wrapper, rather than calling `sudo python3` directly.
 
+## PYNQ's `ip_dict` can disagree with the `.hwh` on disk
+
+Observed on step 05, 2026-08-19. After rebuilding a bitstream with the AXI
+DMA's `c_sg_length_width` raised from 14 to 26 and copying both the `.bit`
+and the `.hwh` to the board, PYNQ still enforced the old 16383-byte transfer
+ceiling:
+
+```
+DMA ceiling: hwh=26 ip_dict=14 -> using 26 bits (67108863 bytes)
+             limits before (16383, 16383, 16383)
+```
+
+The `.hwh` in the same directory as the bitstream carried `VALUE="26"` in
+both its uppercase and lowercase `PARAMETER` blocks, but
+`ol.ip_dict['axi_dma_0']['parameters']['c_sg_length_width']` came back
+**14** — the value from the *previous* build of the same-named overlay.
+PYNQ's DMA driver computes its limit from that dict
+(`pynq/lib/dma.py`, ~line 617), so the stale value won.
+
+The likely mechanism is PYNQ's PL server caching parsed overlay metadata
+keyed on the overlay's name or path, which did not change between builds.
+Not confirmed — a reboot was not tried, and the workaround made it moot.
+
+**What to do about it:** when a hardware parameter changes and the board
+does not seem to notice, read the `.hwh` yourself and compare against
+`ip_dict` before assuming the copy failed or the rebuild didn't take. The
+step 05 driver does exactly this in `unlock_dma_transfer_size()`: it prefers
+the `.hwh` value, falls back to `ip_dict`, then to a constant matching the
+block design, and prints all of them. Limits that live only in Python — as
+this one does — can be corrected in Python once you know the hardware
+really supports it.
+
 ## Alternative: source as yourself, `sudo -E` for the script
 
 `run_pynq.sh` elevates once and does the sourcing *inside* that root

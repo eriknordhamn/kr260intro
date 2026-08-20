@@ -25,7 +25,9 @@ operand vectors arrive interleaved on the single stream (`a0 b0 a1 b1 …`,
 `TLAST` on the final beat), so the vector length is implicit in the packet
 and the IP needs no control interface at all — no AXI4-Lite, no registers.
 Built to a bitstream, deployed, and verified on the KR260:
-`dot_product_test.py` printed `Step 04 PASS`. See the walkthrough below.
+`dot_product_test.py` printed `Step 04 PASS`. The design contract is
+`spec/step04_dot_product.md`, backfilled on 2026-08-20; the walkthrough below
+covers what happened building it.
 
 ## Step 03 — DMA Loopback — COMPLETE
 
@@ -734,8 +736,12 @@ matches a Python-int reference.
 
 ### Performance: host overhead dominates, by two orders of magnitude
 
-Every case took **~0.55 ms wall clock regardless of size** — `allocate` plus
-two `transfer`/`wait` round trips. The largest, 4096×2 = 8192 MACs, is
+Every case took **~0.55 ms wall clock regardless of size** — six PYNQ calls,
+three `transfer` and three `wait`, at roughly 90 µs each. Note what is *not*
+in that figure: the timer starts after `allocate()` and after the buffers are
+filled, so the overhead is DMA arming and polled completion through Python,
+not buffer allocation. It cannot be amortised away by reusing buffers. The
+largest, 4096×2 = 8192 MACs, is
 1024 cycles ≈ 10 µs of actual compute inside 560 µs, i.e. under 2% duty
 cycle. The best figure measured was 15 MMAC/s against a ~800 MMAC/s kernel
 ceiling.

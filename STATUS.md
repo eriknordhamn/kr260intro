@@ -6,6 +6,8 @@ ReLU (or similar) in the PL, and layer-to-layer data flow that stays in the
 fabric instead of returning to the PS between layers. Step 05's timings make
 the case for it: every invocation costs ~0.55 ms of fixed host overhead
 regardless of size, so chaining is worth more than any kernel speedup.
+Draft design spec, including that argument in full and the decisions still
+open: `spec/step06_activation_chaining.md`.
 
 ## Step 05 — Linear Layer — COMPLETE
 
